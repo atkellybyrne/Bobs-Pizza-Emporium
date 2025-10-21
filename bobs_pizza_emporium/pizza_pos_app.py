@@ -18,23 +18,25 @@ class PizzaPOSApp:
         self.root.title("Bob's Pizza Emporium - Point of Sales System")
         self.root.geometry("1200x800")
         
-        # Define color scheme for better readability
+        # Define color scheme inspired by the pizza ordering interface
         self.colors = {
-            'bg_primary': '#ffffff',      # White background
-            'bg_secondary': '#f8f9fa',   # Light gray background
-            'bg_header': '#2c3e50',      # Dark blue header
-            'bg_button': '#3498db',       # Blue buttons
-            'bg_button_hover': '#2980b9', # Darker blue for hover
-            'bg_success': '#27ae60',     # Green for success actions
-            'bg_danger': '#e74c3c',      # Red for danger actions
-            'bg_warning': '#f39c12',     # Orange for warnings
-            'text_primary': '#2c3e50',   # Dark text
-            'text_secondary': '#7f8c8d', # Gray text
-            'text_light': '#ffffff',     # White text
-            'text_accent': '#e74c3c',    # Red accent text
-            'text_button': '#000000',    # Black text for buttons
-            'border': '#bdc3c7',         # Light border
-            'border_dark': '#34495e'      # Dark border
+            'bg_primary': '#e8f4fd',      # Light blue background (like the image)
+            'bg_secondary': '#d1e7f0',    # Medium blue-gray background
+            'bg_sidebar': '#4a6fa5',      # Darker blue for sidebar (like "Current Pizza" area)
+            'bg_header': '#2c3e50',       # Dark blue header
+            'bg_button': '#6bb6ff',       # Bright blue buttons
+            'bg_button_hover': '#5aa3e6', # Darker blue for hover
+            'bg_success': '#27ae60',      # Green for success actions
+            'bg_danger': '#e74c3c',       # Red for danger actions
+            'bg_warning': '#f39c12',      # Orange for warnings
+            'text_primary': '#2c3e50',    # Dark text
+            'text_secondary': '#7f8c8d',  # Gray text
+            'text_light': '#ffffff',      # White text
+            'text_accent': '#e74c3c',     # Red accent text
+            'text_button': '#000000',     # Black text for buttons
+            'border': '#000000',          # Black border (like the image)
+            'border_dark': '#34495e',     # Dark border
+            'topping_bg': '#f0f8ff'       # Light blue for topping buttons
         }
         
         self.root.configure(bg=self.colors['bg_primary'])
@@ -135,14 +137,14 @@ class PizzaPOSApp:
         login_frame = tk.Frame(self.root, bg=self.colors['bg_primary'])
         login_frame.pack(expand=True, fill='both')
         
-        # Title
+        # Title with rounded, friendly font styling
         title_label = tk.Label(login_frame, text="Bob's Pizza Emporium", 
-                              font=('Arial', 28, 'bold'), bg=self.colors['bg_primary'], 
+                              font=('Arial', 32, 'bold'), bg=self.colors['bg_primary'], 
                               fg=self.colors['text_primary'])
         title_label.pack(pady=50)
         
         subtitle_label = tk.Label(login_frame, text="Point of Sales System", 
-                                font=('Arial', 16), bg=self.colors['bg_primary'], 
+                                font=('Arial', 18), bg=self.colors['bg_primary'], 
                                 fg=self.colors['text_secondary'])
         subtitle_label.pack(pady=10)
         
@@ -171,10 +173,10 @@ class PizzaPOSApp:
                                  fg=self.colors['text_primary'])
         self.pin_entry.pack(pady=5)
         
-        # Login button
-        login_btn = tk.Button(form_frame, text="Login", font=('Arial', 12, 'bold'),
+        # Login button with rounded styling
+        login_btn = tk.Button(form_frame, text="Login", font=('Arial', 14, 'bold'),
                              bg=self.colors['bg_button'], fg=self.colors['text_button'], 
-                             width=15, relief='raised', bd=2, padx=20, pady=10,
+                             width=15, relief='raised', bd=3, padx=25, pady=12,
                              activebackground=self.colors['bg_button_hover'],
                              activeforeground=self.colors['text_button'],
                              command=self.login)
@@ -300,13 +302,14 @@ class PizzaPOSApp:
                                 command=lambda p=pizza_name: self.add_standard_pizza(p))
             pizza_btn.pack(fill='x', padx=5, pady=2)
         
-        # Custom pizza button
-        custom_btn = tk.Button(pizza_frame, text="Custom Pizza", font=('Arial', 10, 'bold'),
+        # Custom pizza button with enhanced styling
+        custom_btn = tk.Button(pizza_frame, text="🍕 Custom Pizza", font=('Arial', 12, 'bold'),
                               bg=self.colors['bg_button'], fg=self.colors['text_button'], 
-                              relief='raised', bd=2, command=self.create_custom_pizza,
+                              relief='raised', bd=3, command=self.create_custom_pizza,
                               activebackground=self.colors['bg_button_hover'],
-                              activeforeground=self.colors['text_button'])
-        custom_btn.pack(fill='x', padx=5, pady=5)
+                              activeforeground=self.colors['text_button'],
+                              padx=10, pady=8)
+        custom_btn.pack(fill='x', padx=5, pady=8)
         
         # Drinks section
         drinks_frame = tk.LabelFrame(menu_frame, text="Drinks", font=('Arial', 10, 'bold'),
@@ -372,13 +375,14 @@ class PizzaPOSApp:
                                    fg=self.colors['text_accent'])
         self.total_label.pack(anchor='w')
         
-        # Process order button
-        process_btn = tk.Button(cart_frame, text="Process Order", font=('Arial', 14, 'bold'),
+        # Process order button with enhanced styling
+        process_btn = tk.Button(cart_frame, text="✅ Process Order", font=('Arial', 16, 'bold'),
                                bg=self.colors['bg_success'], fg=self.colors['text_button'], 
-                               relief='raised', bd=2, command=self.process_order,
+                               relief='raised', bd=3, command=self.process_order,
                                activebackground=self.colors['bg_success'],
-                               activeforeground=self.colors['text_button'])
-        process_btn.pack(fill='x', padx=10, pady=10)
+                               activeforeground=self.colors['text_button'],
+                               padx=15, pady=12)
+        process_btn.pack(fill='x', padx=10, pady=15)
     
     def show_admin_view(self, parent):
         """Display admin interface"""
@@ -468,53 +472,279 @@ class PizzaPOSApp:
             messagebox.showerror("Error", "Invalid size. Please enter small, medium, or large.")
     
     def create_custom_pizza(self):
-        """Create custom pizza dialog"""
+        """Create custom pizza dialog inspired by the image design"""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Custom Pizza")
-        dialog.geometry("400x500")
+        dialog.title("Add Pizza")
+        dialog.geometry("1000x700")
         dialog.configure(bg=self.colors['bg_primary'])
         
-        # Size selection
-        size_frame = tk.LabelFrame(dialog, text="Size", font=('Arial', 10, 'bold'), 
-                                   bg=self.colors['bg_primary'], fg=self.colors['text_primary'],
-                                   relief='solid', bd=1)
-        size_frame.pack(fill='x', padx=10, pady=10)
+        # Header with user info (like in the image)
+        header_frame = tk.Frame(dialog, bg=self.colors['bg_primary'], height=60)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        # User avatar placeholder (simple circle)
+        avatar_frame = tk.Frame(header_frame, bg=self.colors['bg_secondary'], width=40, height=40)
+        avatar_frame.pack(side='left', padx=20, pady=10)
+        avatar_frame.pack_propagate(False)
+        
+        # Title
+        title_label = tk.Label(header_frame, text="Add Pizza", 
+                              font=('Arial', 24, 'bold'), bg=self.colors['bg_primary'], 
+                              fg=self.colors['text_primary'])
+        title_label.pack(side='left', padx=20, pady=15)
+        
+        # Username display
+        username_label = tk.Label(header_frame, text=self.current_user['username'], 
+                                 font=('Arial', 16, 'bold'), bg=self.colors['bg_primary'], 
+                                 fg=self.colors['text_primary'])
+        username_label.pack(side='right', padx=20, pady=15)
+        
+        # Main content frame
+        main_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Left sidebar - Current Pizza (like in the image)
+        sidebar_frame = tk.Frame(main_frame, bg=self.colors['bg_sidebar'], width=250)
+        sidebar_frame.pack(side='left', fill='y', padx=(0, 10))
+        sidebar_frame.pack_propagate(False)
+        
+        # Current Pizza title
+        current_pizza_label = tk.Label(sidebar_frame, text="Current Pizza", 
+                                      font=('Arial', 16, 'bold'), bg=self.colors['bg_sidebar'], 
+                                      fg=self.colors['text_light'])
+        current_pizza_label.pack(pady=20)
+        
+        # Current toppings display
+        self.current_toppings_text = tk.Text(sidebar_frame, height=8, width=25, 
+                                           font=('Arial', 10), bg=self.colors['bg_sidebar'], 
+                                           fg=self.colors['text_light'], relief='flat', bd=0)
+        self.current_toppings_text.pack(pady=10, padx=10)
+        self.current_toppings_text.insert('1.0', "")
+        self.current_toppings_text.config(state='disabled')
+        
+        # Size selection in sidebar
+        size_label = tk.Label(sidebar_frame, text="Size", 
+                             font=('Arial', 14, 'bold'), bg=self.colors['bg_sidebar'], 
+                             fg=self.colors['text_light'])
+        size_label.pack(pady=(20, 10))
+        
+        # Size selection frame
+        size_frame = tk.Frame(sidebar_frame, bg=self.colors['bg_sidebar'])
+        size_frame.pack(pady=10)
         
         self.selected_size = tk.StringVar(value="medium")
-        for size in self.pizza_prices.keys():
-            tk.Radiobutton(size_frame, text=f"{size.title()} - ${self.pizza_prices[size]}", 
-                          variable=self.selected_size, value=size, 
-                          bg=self.colors['bg_primary'], fg=self.colors['text_primary']).pack(anchor='w')
+        self.size_buttons = {}
         
-        # Toppings selection
-        toppings_frame = tk.LabelFrame(dialog, text="Toppings", font=('Arial', 10, 'bold'), 
-                                       bg=self.colors['bg_primary'], fg=self.colors['text_primary'],
-                                       relief='solid', bd=1)
-        toppings_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        # Create visual size buttons (inspired by the image's circular size indicators)
+        sizes = ['small', 'medium', 'large']
+        size_icons = ['●', '●●', '●●●']  # Simple circular indicators
+        
+        for i, size in enumerate(sizes):
+            # Create circular-like button with size indicator
+            size_btn = tk.Button(size_frame, text=f"{size_icons[i]}\n{size.title()}\n${self.pizza_prices[size]}", 
+                                font=('Arial', 9, 'bold'), width=6, height=4,
+                                bg=self.colors['bg_secondary'], fg=self.colors['text_button'], 
+                                relief='raised', bd=3, command=lambda s=size: self.select_size(s),
+                                activebackground=self.colors['bg_button_hover'],
+                                activeforeground=self.colors['text_button'])
+            size_btn.pack(side='left', padx=3)
+            self.size_buttons[size] = size_btn
+        
+        # Highlight medium by default
+        self.size_buttons['medium'].config(bg=self.colors['bg_button'])
+        
+        # Add to Order button
+        add_to_order_btn = tk.Button(sidebar_frame, text="Add to Order", font=('Arial', 14, 'bold'),
+                                   bg=self.colors['bg_success'], fg=self.colors['text_button'], 
+                                   relief='raised', bd=3, command=lambda: self.add_pizza_to_order(dialog),
+                                   activebackground=self.colors['bg_success'],
+                                   activeforeground=self.colors['text_button'],
+                                   padx=15, pady=10)
+        add_to_order_btn.pack(pady=20)
+        
+        # Right side - Topping selection area (like in the image)
+        toppings_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'])
+        toppings_frame.pack(side='right', fill='both', expand=True)
+        
+        # Toppings title
+        toppings_title = tk.Label(toppings_frame, text="Select Toppings", 
+                                 font=('Arial', 18, 'bold'), bg=self.colors['bg_secondary'], 
+                                 fg=self.colors['text_primary'])
+        toppings_title.pack(pady=20)
+        
+        # Toppings grid (2 columns, 3 rows like in the image)
+        toppings_grid = tk.Frame(toppings_frame, bg=self.colors['bg_secondary'])
+        toppings_grid.pack(expand=True, padx=20, pady=20)
         
         self.selected_toppings = {}
-        for topping, price in self.topping_prices.items():
-            var = tk.BooleanVar()
-            self.selected_toppings[topping] = var
-            tk.Checkbutton(toppings_frame, text=f"{topping} - ${price}", 
-                          variable=var, bg=self.colors['bg_primary'], 
-                          fg=self.colors['text_primary']).pack(anchor='w')
+        self.topping_counts = {}
         
-        # Buttons
+        # Create topping buttons with +/- controls and icons (like in the image)
+        toppings = list(self.topping_prices.keys())
+        print(f"DEBUG: Toppings list: {toppings}")  # Debug line
+        
+        # Topping icons based on the image descriptions
+        topping_icons = {
+            'Pepperoni': '🍕',      # Red-brown pepperoni slices
+            'Bacon': '🥓',           # Wavy bacon strip
+            'Mushrooms': '🍄',       # Mushroom cap
+            'Onions': '🧅',          # Purple onion
+            'Sausage': '🌭',         # Sausage link
+            'Pineapple': '🍍'        # Pineapple chunk
+        }
+        
+        for i, topping in enumerate(toppings):
+            row = i // 2
+            col = i % 2
+            print(f"DEBUG: Creating buttons for topping: {topping} at row {row}, col {col}")  # Debug line
+            
+            # Topping button frame
+            topping_frame = tk.Frame(toppings_grid, bg=self.colors['topping_bg'], 
+                                   relief='raised', bd=3)
+            topping_frame.grid(row=row, column=col, padx=10, pady=10, sticky='ew')
+            
+            # Topping icon and name
+            icon_label = tk.Label(topping_frame, text=topping_icons.get(topping, '🍕'), 
+                                 font=('Arial', 20), bg=self.colors['topping_bg'], 
+                                 fg=self.colors['text_primary'])
+            icon_label.pack(pady=(8, 2))
+            
+            topping_label = tk.Label(topping_frame, text=topping, 
+                                   font=('Arial', 11, 'bold'), bg=self.colors['topping_bg'], 
+                                   fg=self.colors['text_primary'])
+            topping_label.pack(pady=(0, 5))
+            
+            # Controls frame
+            controls_frame = tk.Frame(topping_frame, bg=self.colors['topping_bg'])
+            controls_frame.pack(pady=5)
+            
+            # Create closure to capture the current topping value
+            def make_decrease_handler(t):
+                return lambda: self.decrease_topping(t)
+            
+            def make_increase_handler(t):
+                return lambda: self.increase_topping(t)
+            
+            # Minus button
+            minus_btn = tk.Button(controls_frame, text="—", font=('Arial', 18, 'bold'), 
+                                 width=3, height=1, bg=self.colors['bg_secondary'], 
+                                 fg=self.colors['text_button'], relief='raised', bd=3,
+                                 command=make_decrease_handler(topping),
+                                 activebackground=self.colors['bg_button_hover'],
+                                 activeforeground=self.colors['text_button'])
+            minus_btn.pack(side='left', padx=5)
+            
+            # Count display
+            count_label = tk.Label(controls_frame, text="0", font=('Arial', 16, 'bold'), 
+                                  bg=self.colors['topping_bg'], fg=self.colors['text_primary'],
+                                  width=3)
+            count_label.pack(side='left', padx=5)
+            
+            # Plus button
+            plus_btn = tk.Button(controls_frame, text="+", font=('Arial', 18, 'bold'), 
+                                width=3, height=1, bg=self.colors['bg_secondary'], 
+                                fg=self.colors['text_button'], relief='raised', bd=3,
+                                command=make_increase_handler(topping),
+                                activebackground=self.colors['bg_button_hover'],
+                                activeforeground=self.colors['text_button'])
+            plus_btn.pack(side='left', padx=5)
+            
+            # Store references
+            self.topping_counts[topping] = count_label
+            print(f"DEBUG: Stored count label for {topping}")  # Debug line
+        
+        # Configure grid weights
+        toppings_grid.columnconfigure(0, weight=1)
+        toppings_grid.columnconfigure(1, weight=1)
+        
+        # Bottom buttons
         button_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
-        button_frame.pack(fill='x', padx=10, pady=10)
+        button_frame.pack(fill='x', padx=20, pady=20)
         
-        tk.Button(button_frame, text="Add to Cart", font=('Arial', 10, 'bold'),
-                 bg=self.colors['bg_success'], fg=self.colors['text_button'], 
-                 relief='raised', bd=2, command=lambda: self.add_custom_pizza(dialog),
-                 activebackground=self.colors['bg_success'],
-                 activeforeground=self.colors['text_button']).pack(side='right', padx=5)
-        
-        tk.Button(button_frame, text="Cancel", font=('Arial', 10),
+        tk.Button(button_frame, text="Cancel", font=('Arial', 12),
                  bg=self.colors['bg_danger'], fg=self.colors['text_button'], 
                  relief='raised', bd=2, command=dialog.destroy,
                  activebackground=self.colors['bg_danger'],
-                 activeforeground=self.colors['text_button']).pack(side='right', padx=5)
+                 activeforeground=self.colors['text_button']).pack(side='right', padx=10)
+    
+    def select_size(self, size):
+        """Select pizza size and update visual feedback"""
+        self.selected_size.set(size)
+        # Reset all buttons to default color
+        for s, btn in self.size_buttons.items():
+            btn.config(bg=self.colors['bg_secondary'])
+        # Highlight selected size
+        self.size_buttons[size].config(bg=self.colors['bg_button'])
+        self.update_current_pizza_display()
+    
+    def increase_topping(self, topping):
+        """Increase topping count"""
+        print(f"DEBUG: increase_topping called with: {topping}")  # Debug line
+        print(f"DEBUG: topping_counts keys: {list(self.topping_counts.keys())}")  # Debug line
+        if topping not in self.selected_toppings:
+            self.selected_toppings[topping] = 0
+        self.selected_toppings[topping] += 1
+        if topping in self.topping_counts:
+            self.topping_counts[topping].config(text=str(self.selected_toppings[topping]))
+            print(f"DEBUG: Updated count for {topping} to {self.selected_toppings[topping]}")  # Debug line
+        else:
+            print(f"DEBUG: ERROR - {topping} not found in topping_counts!")  # Debug line
+        self.update_current_pizza_display()
+    
+    def decrease_topping(self, topping):
+        """Decrease topping count"""
+        if topping not in self.selected_toppings:
+            self.selected_toppings[topping] = 0
+        if self.selected_toppings[topping] > 0:
+            self.selected_toppings[topping] -= 1
+            self.topping_counts[topping].config(text=str(self.selected_toppings[topping]))
+            self.update_current_pizza_display()
+    
+    def update_current_pizza_display(self):
+        """Update the current pizza display in the sidebar"""
+        self.current_toppings_text.config(state='normal')
+        self.current_toppings_text.delete('1.0', tk.END)
+        
+        # Show selected size
+        size_text = f"Size: {self.selected_size.get().title()}\n\n"
+        self.current_toppings_text.insert('1.0', size_text)
+        
+        # Show selected toppings
+        toppings_text = "Toppings:\n"
+        has_toppings = False
+        for topping, count in self.selected_toppings.items():
+            if count > 0:
+                has_toppings = True
+                toppings_text += f"• {topping} x{count}\n"
+        
+        if not has_toppings:
+            toppings_text += ""
+        
+        self.current_toppings_text.insert(tk.END, toppings_text)
+        self.current_toppings_text.config(state='disabled')
+    
+    def add_pizza_to_order(self, dialog):
+        """Add pizza to order with validation"""
+        # Check if size is selected
+        size = self.selected_size.get()
+        if not size:
+            messagebox.showwarning("Size Required", "Please select a pizza size before adding to order.")
+            return
+        
+        # Check if at least one topping is selected
+        has_toppings = False
+        for topping, count in self.selected_toppings.items():
+            if count > 0:
+                has_toppings = True
+                break
+        
+        if not has_toppings:
+            messagebox.showwarning("Toppings Required", "Please select at least one topping before adding to order.")
+            return
+        
+        # Add the pizza to cart
+        self.add_custom_pizza(dialog)
     
     def add_custom_pizza(self, dialog):
         """Add custom pizza to cart"""
@@ -523,16 +753,26 @@ class PizzaPOSApp:
         
         toppings = []
         topping_price = Decimal('0.00')
-        for topping, var in self.selected_toppings.items():
-            if var.get():
-                toppings.append(topping)
-                topping_price += self.topping_prices[topping]
+        for topping, count in self.selected_toppings.items():
+            if count > 0:
+                # Add topping multiple times based on count
+                for _ in range(count):
+                    toppings.append(topping)
+                    topping_price += self.topping_prices[topping]
         
         total_price = base_price + topping_price
         
+        # Create descriptive name
+        if toppings:
+            topping_names = [f"{topping} x{self.selected_toppings[topping]}" 
+                           for topping in toppings if self.selected_toppings[topping] > 0]
+            pizza_name = f"Custom Pizza ({size.title()}) - {', '.join(topping_names)}"
+        else:
+            pizza_name = f"Custom Pizza ({size.title()}) - Plain"
+        
         item = {
             'type': 'custom_pizza',
-            'name': f"Custom Pizza ({size.title()})",
+            'name': pizza_name,
             'price': total_price,
             'size': size,
             'toppings': toppings
