@@ -753,19 +753,21 @@ class PizzaPOSApp:
         
         toppings = []
         topping_price = Decimal('0.00')
+        
+        # Group toppings by name and calculate total price
+        topping_groups = {}
         for topping, count in self.selected_toppings.items():
             if count > 0:
-                # Add topping multiple times based on count
+                topping_groups[topping] = count
+                # Add topping price for each quantity
                 for _ in range(count):
-                    toppings.append(topping)
                     topping_price += self.topping_prices[topping]
         
         total_price = base_price + topping_price
         
-        # Create descriptive name
-        if toppings:
-            topping_names = [f"{topping} x{self.selected_toppings[topping]}" 
-                           for topping in toppings if self.selected_toppings[topping] > 0]
+        # Create descriptive name with grouped toppings
+        if topping_groups:
+            topping_names = [f"{topping} x{count}" for topping, count in topping_groups.items()]
             pizza_name = f"Custom Pizza ({size.title()}) - {', '.join(topping_names)}"
         else:
             pizza_name = f"Custom Pizza ({size.title()}) - Plain"
@@ -775,7 +777,7 @@ class PizzaPOSApp:
             'name': pizza_name,
             'price': total_price,
             'size': size,
-            'toppings': toppings
+            'toppings': list(topping_groups.keys())  # Store unique topping names
         }
         
         self.cart.append(item)
