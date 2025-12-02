@@ -1,0 +1,21 @@
+# Executable and build artifacts
+dist/
+build/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database (optional - remove if you want to track it)
+# pizza_pos.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+

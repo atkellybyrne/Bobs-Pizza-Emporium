@@ -100,8 +100,8 @@ def main():
     print("STARTING PIZZA POS SYSTEM")
     print("=" * 60)
     print("\nDefault Login Credentials:")
-    print("   Admin: username='admin', PIN='1234'")
-    print("   Employee: username='employee', PIN='5678'")
+    print("   Admin: PIN='1234'")
+    print("   Employee: PIN='5678'")
     print("\n" + "=" * 60)
     
     # Run the application

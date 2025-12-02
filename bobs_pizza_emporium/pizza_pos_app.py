@@ -48,33 +48,15 @@ class PizzaPOSApp:
         self.current_user = None
         self.cart = []
         self.total = Decimal('0.00')
-        self.tax_rate = Decimal('0.08')  # 8% tax rate
         
-        # Pizza prices
-        self.pizza_prices = {
-            'small': Decimal('12.99'),
-            'medium': Decimal('15.99'),
-            'large': Decimal('18.99')
-        }
+        # Initialize prices (will be loaded from database)
+        self.pizza_prices = {}
+        self.topping_prices = {}
+        self.drink_prices = {}
+        self.tax_rate = Decimal('0.08')
         
-        # Topping prices
-        self.topping_prices = {
-            'Pepperoni': Decimal('1.50'),
-            'Sausage': Decimal('1.50'),
-            'Bacon': Decimal('2.00'),
-            'Pineapple': Decimal('1.00'),
-            'Mushrooms': Decimal('1.00'),
-            'Onions': Decimal('1.00')
-        }
-        
-        # Drink prices
-        self.drink_prices = {
-            'Coca-Cola': Decimal('2.50'),
-            'Pepsi': Decimal('2.50'),
-            'Sprite': Decimal('2.50'),
-            'Water': Decimal('1.50'),
-            'Orange Juice': Decimal('3.00')
-        }
+        # Load prices from database
+        self.load_prices_from_database()
         
         # Show login screen
         self.show_login()
@@ -109,23 +91,109 @@ class PizzaPOSApp:
             )
         ''')
         
-        # Create default admin user if not exists
-        self.cursor.execute('SELECT COUNT(*) FROM users WHERE is_admin = 1')
+        # Create prices table
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS prices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                item_name TEXT NOT NULL,
+                price DECIMAL(10,2) NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(category, item_name)
+            )
+        ''')
+        
+        # Create default admin user if not exists (PIN: 1234)
+        self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', ('1234',))
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute('''
                 INSERT INTO users (username, pin, is_admin) 
-                VALUES ('admin', '1234', 1)
+                VALUES ('1234', '1234', 1)
             ''')
         
-        # Create default regular user if not exists
-        self.cursor.execute('SELECT COUNT(*) FROM users WHERE is_admin = 0')
+        # Create default regular user if not exists (PIN: 5678)
+        self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', ('5678',))
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute('''
                 INSERT INTO users (username, pin, is_admin) 
-                VALUES ('employee', '5678', 0)
+                VALUES ('5678', '5678', 0)
             ''')
+        
+        # Initialize default prices if not exists
+        self.init_default_prices()
         
         self.conn.commit()
+    
+    def init_default_prices(self):
+        """Initialize default prices in database if they don't exist"""
+        # Default pizza prices
+        default_pizza = [
+            ('pizza', 'small', '12.99'),
+            ('pizza', 'medium', '15.99'),
+            ('pizza', 'large', '18.99')
+        ]
+        
+        # Default topping prices
+        default_toppings = [
+            ('topping', 'Pepperoni', '1.50'),
+            ('topping', 'Sausage', '1.50'),
+            ('topping', 'Bacon', '2.00'),
+            ('topping', 'Pineapple', '1.00'),
+            ('topping', 'Mushrooms', '1.00'),
+            ('topping', 'Onions', '1.00')
+        ]
+        
+        # Default drink prices
+        default_drinks = [
+            ('drink', 'Coca-Cola', '2.50'),
+            ('drink', 'Pepsi', '2.50'),
+            ('drink', 'Sprite', '2.50'),
+            ('drink', 'Water', '1.50'),
+            ('drink', 'Orange Juice', '3.00')
+        ]
+        
+        # Default tax rate
+        default_tax = [('tax', 'rate', '0.08')]
+        
+        # Insert all defaults
+        all_defaults = default_pizza + default_toppings + default_drinks + default_tax
+        
+        for category, item_name, price in all_defaults:
+            self.cursor.execute('''
+                INSERT OR IGNORE INTO prices (category, item_name, price)
+                VALUES (?, ?, ?)
+            ''', (category, item_name, price))
+    
+    def load_prices_from_database(self):
+        """Load prices from database"""
+        # Load pizza prices
+        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('pizza',))
+        pizza_data = self.cursor.fetchall()
+        self.pizza_prices = {}
+        for size, price in pizza_data:
+            self.pizza_prices[size] = Decimal(str(price))
+        
+        # Load topping prices
+        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('topping',))
+        topping_data = self.cursor.fetchall()
+        self.topping_prices = {}
+        for name, price in topping_data:
+            self.topping_prices[name] = Decimal(str(price))
+        
+        # Load drink prices
+        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('drink',))
+        drink_data = self.cursor.fetchall()
+        self.drink_prices = {}
+        for name, price in drink_data:
+            self.drink_prices[name] = Decimal(str(price))
+        
+        # Load tax rate
+        self.cursor.execute('SELECT price FROM prices WHERE category = ? AND item_name = ?', ('tax', 'rate'))
+        tax_data = self.cursor.fetchone()
+        if tax_data:
+            self.tax_rate = Decimal(str(tax_data[0]))
+        else:
+            self.tax_rate = Decimal('0.08')  # Default 8%
     
     def show_login(self):
         """Display login screen"""
@@ -157,21 +225,13 @@ class PizzaPOSApp:
         form_frame = tk.Frame(form_container, bg=self.colors['bg_secondary'])
         form_frame.pack(pady=30, padx=30)
         
-        # Username
-        tk.Label(form_frame, text="Username:", font=('Arial', 12, 'bold'), 
-                bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(0,5))
-        self.username_entry = tk.Entry(form_frame, font=('Arial', 12), width=25,
-                                      relief='solid', bd=1, bg=self.colors['bg_primary'],
-                                      fg=self.colors['text_primary'])
-        self.username_entry.pack(pady=5)
-        
         # PIN
-        tk.Label(form_frame, text="4-Digit PIN:", font=('Arial', 12, 'bold'), 
-                bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(15,5))
-        self.pin_entry = tk.Entry(form_frame, font=('Arial', 12), width=25, show='*',
-                                 relief='solid', bd=1, bg=self.colors['bg_primary'],
-                                 fg=self.colors['text_primary'])
-        self.pin_entry.pack(pady=5)
+        tk.Label(form_frame, text="Enter 4-Digit PIN:", font=('Arial', 14, 'bold'), 
+                bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(0,10))
+        self.pin_entry = tk.Entry(form_frame, font=('Arial', 16), width=20, show='*',
+                                 relief='solid', bd=2, bg=self.colors['bg_primary'],
+                                 fg=self.colors['text_primary'], justify='center')
+        self.pin_entry.pack(pady=10)
         
         # Login button with rounded styling
         login_btn = tk.Button(form_frame, text="Login", font=('Arial', 14, 'bold'),
@@ -182,55 +242,42 @@ class PizzaPOSApp:
                              command=self.login)
         login_btn.pack(pady=20)
         
-        # Forgot password button
-        forgot_btn = tk.Button(form_frame, text="Forgot Password", font=('Arial', 10),
-                              bg=self.colors['bg_secondary'], fg=self.colors['text_button'], 
-                              relief='raised', bd=1, command=self.forgot_password,
-                              activebackground=self.colors['bg_secondary'],
-                              activeforeground=self.colors['text_button'])
-        forgot_btn.pack(pady=5)
-        
         # Bind Enter key to login
         self.root.bind('<Return>', lambda e: self.login())
-        self.username_entry.focus()
+        self.pin_entry.focus()
     
     def login(self):
         """Handle login authentication"""
-        username = self.username_entry.get().strip()
         pin = self.pin_entry.get().strip()
         
-        if not username or not pin:
-            messagebox.showerror("Error", "Please enter both username and PIN")
+        if not pin:
+            messagebox.showerror("Error", "Please enter a PIN")
             return
         
         if len(pin) != 4 or not pin.isdigit():
             messagebox.showerror("Error", "PIN must be exactly 4 digits")
+            self.pin_entry.delete(0, tk.END)
             return
         
-        # Check credentials
+        # Check credentials by PIN only
         self.cursor.execute('''
-            SELECT id, username, is_admin FROM users 
-            WHERE username = ? AND pin = ?
-        ''', (username, pin))
+            SELECT id, pin, is_admin FROM users 
+            WHERE pin = ?
+        ''', (pin,))
         
         user = self.cursor.fetchone()
         
         if user:
             self.current_user = {
                 'id': user[0],
-                'username': user[1],
+                'pin': user[1],
                 'is_admin': bool(user[2])
             }
             self.show_main_screen()
         else:
-            messagebox.showerror("Error", "Invalid username or PIN")
+            messagebox.showerror("Error", "Invalid PIN")
             self.pin_entry.delete(0, tk.END)
     
-    def forgot_password(self):
-        """Handle forgot password functionality"""
-        messagebox.showinfo("Password Reset", 
-                           "An alert has been sent to the administrator. "
-                           "Please contact your admin to reset your password.")
     
     def show_main_screen(self):
         """Display main application screen"""
@@ -248,7 +295,8 @@ class PizzaPOSApp:
         header_frame.pack_propagate(False)
         
         # User info
-        user_label = tk.Label(header_frame, text=f"Welcome, {self.current_user['username']}", 
+        user_type = "Admin" if self.current_user['is_admin'] else "Employee"
+        user_label = tk.Label(header_frame, text=f"PIN: {self.current_user['pin']} ({user_type})", 
                              font=('Arial', 14, 'bold'), bg=self.colors['bg_header'], 
                              fg=self.colors['text_light'])
         user_label.pack(side='right', padx=20, pady=15)
@@ -454,22 +502,107 @@ class PizzaPOSApp:
         self.load_users()
     
     def add_standard_pizza(self, pizza_name):
-        """Add standard pizza to cart"""
-        size = simpledialog.askstring("Pizza Size", "Enter size (small/medium/large):", 
-                                     initialvalue="medium")
-        if size and size.lower() in self.pizza_prices:
-            size = size.lower()
-            price = self.pizza_prices[size]
-            item = {
-                'type': 'pizza',
-                'name': f"{pizza_name} ({size.title()})",
-                'price': price,
-                'size': size
-            }
-            self.cart.append(item)
-            self.update_cart_display()
-        elif size:
-            messagebox.showerror("Error", "Invalid size. Please enter small, medium, or large.")
+        """Add standard pizza to cart with size selection dialog"""
+        # Create size selection dialog
+        size_dialog = tk.Toplevel(self.root)
+        size_dialog.title("Select Pizza Size")
+        dialog_width = 700
+        dialog_height = 600
+        size_dialog.geometry(f"{dialog_width}x{dialog_height}")
+        size_dialog.configure(bg=self.colors['bg_primary'])
+        size_dialog.transient(self.root)
+        size_dialog.grab_set()
+        
+        # Center the dialog
+        size_dialog.update_idletasks()
+        x = (size_dialog.winfo_screenwidth() // 2) - (dialog_width // 2)
+        y = (size_dialog.winfo_screenheight() // 2) - (dialog_height // 2)
+        size_dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+        
+        # Main container frame - everything in one frame
+        main_container = tk.Frame(size_dialog, bg=self.colors['bg_primary'])
+        main_container.pack(fill='both', expand=True, padx=30, pady=20)
+        
+        # Title
+        title_label = tk.Label(main_container, text=f"Select Size for {pizza_name}", 
+                              font=('Arial', 20, 'bold'), bg=self.colors['bg_primary'], 
+                              fg=self.colors['text_primary'])
+        title_label.pack(pady=(0, 25))
+        
+        # Size selection frame - fixed height, no expand
+        size_frame = tk.Frame(main_container, bg=self.colors['bg_primary'])
+        size_frame.pack(fill='x', pady=10)
+        
+        selected_size = tk.StringVar(value="medium")
+        size_buttons = {}
+        
+        # Create size buttons
+        sizes = ['small', 'medium', 'large']
+        size_icons = ['●', '●●', '●●●']
+        
+        for i, size in enumerate(sizes):
+            size_container = tk.Frame(size_frame, bg=self.colors['bg_primary'])
+            size_container.pack(pady=15, padx=20, fill='x')
+            
+            size_btn = tk.Radiobutton(size_container, 
+                                     text=f"{size_icons[i]} {size.title()} - ${self.pizza_prices[size]}",
+                                     font=('Arial', 16, 'bold'),
+                                     variable=selected_size,
+                                     value=size,
+                                     bg=self.colors['bg_secondary'],
+                                     fg=self.colors['text_primary'],
+                                     selectcolor=self.colors['bg_button'],
+                                     activebackground=self.colors['bg_secondary'],
+                                     activeforeground=self.colors['text_primary'],
+                                     indicatoron=1,
+                                     width=40,
+                                     height=3,
+                                     relief='raised',
+                                     bd=4)
+            size_btn.pack(fill='x', expand=True)
+            size_buttons[size] = size_btn
+        
+        # Separator line
+        separator = tk.Frame(main_container, height=2, bg=self.colors['border_dark'])
+        separator.pack(fill='x', pady=20)
+        
+        # Action buttons frame - always visible at bottom
+        button_frame = tk.Frame(main_container, bg=self.colors['bg_secondary'], relief='raised', bd=3)
+        button_frame.pack(fill='x', pady=(10, 0))
+        
+        def add_to_cart():
+            """Add pizza to cart with selected size"""
+            size = selected_size.get()
+            if size in self.pizza_prices:
+                price = self.pizza_prices[size]
+                item = {
+                    'type': 'pizza',
+                    'name': f"{pizza_name} ({size.title()})",
+                    'price': price,
+                    'size': size
+                }
+                self.cart.append(item)
+                self.update_cart_display()
+                size_dialog.destroy()
+                messagebox.showinfo("Added", f"{pizza_name} ({size.title()}) added to cart!")
+        
+        # Inner button container for better spacing
+        inner_button_frame = tk.Frame(button_frame, bg=self.colors['bg_secondary'])
+        inner_button_frame.pack(pady=15, padx=15)
+        
+        tk.Button(inner_button_frame, text="Add to Cart", font=('Arial', 14, 'bold'),
+                 bg=self.colors['bg_success'], fg=self.colors['text_button'], 
+                 relief='raised', bd=3, command=add_to_cart,
+                 activebackground=self.colors['bg_success'],
+                 activeforeground=self.colors['text_button'],
+                 padx=30, pady=12, width=15).pack(side='right', padx=10)
+        
+        tk.Button(inner_button_frame, text="Cancel", font=('Arial', 14, 'bold'),
+                 bg=self.colors['bg_danger'], fg=self.colors['text_button'], 
+                 relief='raised', bd=3, command=size_dialog.destroy,
+                 activebackground=self.colors['bg_danger'],
+                 activeforeground=self.colors['text_button'],
+                 padx=30, pady=12, width=15).pack(side='right', padx=10)
     
     def create_custom_pizza(self):
         """Create custom pizza dialog inspired by the image design"""
@@ -494,11 +627,20 @@ class PizzaPOSApp:
                               fg=self.colors['text_primary'])
         title_label.pack(side='left', padx=20, pady=15)
         
-        # Username display
-        username_label = tk.Label(header_frame, text=self.current_user['username'], 
+        # Back button in header
+        back_btn_header = tk.Button(header_frame, text="← Back to Menu", font=('Arial', 12, 'bold'),
+                                    bg=self.colors['bg_warning'], fg=self.colors['text_button'], 
+                                    relief='raised', bd=2, command=dialog.destroy,
+                                    activebackground=self.colors['bg_warning'],
+                                    activeforeground=self.colors['text_button'],
+                                    padx=15, pady=8)
+        back_btn_header.pack(side='right', padx=10, pady=15)
+        
+        # PIN display
+        pin_label = tk.Label(header_frame, text=f"PIN: {self.current_user['pin']}", 
                                  font=('Arial', 16, 'bold'), bg=self.colors['bg_primary'], 
                                  fg=self.colors['text_primary'])
-        username_label.pack(side='right', padx=20, pady=15)
+        pin_label.pack(side='right', padx=20, pady=15)
         
         # Main content frame
         main_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
@@ -561,7 +703,16 @@ class PizzaPOSApp:
                                    activebackground=self.colors['bg_success'],
                                    activeforeground=self.colors['text_button'],
                                    padx=15, pady=10)
-        add_to_order_btn.pack(pady=20)
+        add_to_order_btn.pack(pady=15)
+        
+        # Back to Menu button in sidebar
+        back_btn_sidebar = tk.Button(sidebar_frame, text="← Back to Menu", font=('Arial', 12, 'bold'),
+                                     bg=self.colors['bg_warning'], fg=self.colors['text_button'], 
+                                     relief='raised', bd=2, command=dialog.destroy,
+                                     activebackground=self.colors['bg_warning'],
+                                     activeforeground=self.colors['text_button'],
+                                     padx=15, pady=10)
+        back_btn_sidebar.pack(pady=10)
         
         # Right side - Topping selection area (like in the image)
         toppings_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'])
@@ -658,15 +809,6 @@ class PizzaPOSApp:
         toppings_grid.columnconfigure(0, weight=1)
         toppings_grid.columnconfigure(1, weight=1)
         
-        # Bottom buttons
-        button_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
-        button_frame.pack(fill='x', padx=20, pady=20)
-        
-        tk.Button(button_frame, text="Cancel", font=('Arial', 12),
-                 bg=self.colors['bg_danger'], fg=self.colors['text_button'], 
-                 relief='raised', bd=2, command=dialog.destroy,
-                 activebackground=self.colors['bg_danger'],
-                 activeforeground=self.colors['text_button']).pack(side='right', padx=10)
     
     def select_size(self, size):
         """Select pizza size and update visual feedback"""
@@ -862,27 +1004,19 @@ class PizzaPOSApp:
     def load_users(self):
         """Load users for admin view"""
         self.user_listbox.delete(0, tk.END)
-        self.cursor.execute('SELECT username, is_admin FROM users ORDER BY username')
+        self.cursor.execute('SELECT pin, is_admin FROM users ORDER BY pin')
         users = self.cursor.fetchall()
         
-        for username, is_admin in users:
+        for pin, is_admin in users:
             admin_text = " (Admin)" if is_admin else ""
-            self.user_listbox.insert(tk.END, f"{username}{admin_text}")
+            self.user_listbox.insert(tk.END, f"PIN: {pin}{admin_text}")
     
     def add_user(self):
         """Add new user"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add User")
-        dialog.geometry("300x200")
+        dialog.geometry("300x180")
         dialog.configure(bg=self.colors['bg_primary'])
-        
-        # Username
-        tk.Label(dialog, text="Username:", font=('Arial', 10, 'bold'), 
-                bg=self.colors['bg_primary'], fg=self.colors['text_primary']).pack(anchor='w', padx=10, pady=5)
-        username_entry = tk.Entry(dialog, font=('Arial', 10), width=20,
-                                 relief='solid', bd=1, bg=self.colors['bg_primary'],
-                                 fg=self.colors['text_primary'])
-        username_entry.pack(padx=10, pady=5)
         
         # PIN
         tk.Label(dialog, text="4-Digit PIN:", font=('Arial', 10, 'bold'), 
@@ -903,28 +1037,34 @@ class PizzaPOSApp:
         button_frame.pack(fill='x', padx=10, pady=10)
         
         def save_user():
-            username = username_entry.get().strip()
             pin = pin_entry.get().strip()
             
-            if not username or not pin:
-                messagebox.showerror("Error", "Please enter both username and PIN")
+            if not pin:
+                messagebox.showerror("Error", "Please enter a PIN")
                 return
             
             if len(pin) != 4 or not pin.isdigit():
                 messagebox.showerror("Error", "PIN must be exactly 4 digits")
                 return
             
+            # Check if PIN already exists
+            self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', (pin,))
+            if self.cursor.fetchone()[0] > 0:
+                messagebox.showerror("Error", "This PIN is already in use")
+                return
+            
             try:
+                # Use PIN as username for database compatibility (username column still exists)
                 self.cursor.execute('''
                     INSERT INTO users (username, pin, is_admin)
                     VALUES (?, ?, ?)
-                ''', (username, pin, int(is_admin_var.get())))
+                ''', (pin, pin, int(is_admin_var.get())))
                 self.conn.commit()
                 messagebox.showinfo("Success", "User added successfully!")
                 dialog.destroy()
                 self.load_users()
             except sqlite3.IntegrityError:
-                messagebox.showerror("Error", "Username already exists")
+                messagebox.showerror("Error", "This PIN is already in use")
         
         tk.Button(button_frame, text="Save", font=('Arial', 10, 'bold'),
                  bg=self.colors['bg_success'], fg=self.colors['text_button'], 
@@ -945,10 +1085,11 @@ class PizzaPOSApp:
             messagebox.showwarning("No Selection", "Please select a user to edit")
             return
         
-        username = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        pin_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        old_pin = pin_text.replace('PIN: ', '').strip()
         
         # Get user data
-        self.cursor.execute('SELECT username, pin, is_admin FROM users WHERE username = ?', (username,))
+        self.cursor.execute('SELECT pin, is_admin FROM users WHERE pin = ?', (old_pin,))
         user_data = self.cursor.fetchone()
         
         if not user_data:
@@ -957,53 +1098,58 @@ class PizzaPOSApp:
         
         dialog = tk.Toplevel(self.root)
         dialog.title("Edit User")
-        dialog.geometry("300x200")
-        dialog.configure(bg='#f0f0f0')
-        
-        # Username
-        tk.Label(dialog, text="Username:", font=('Arial', 10), bg='#f0f0f0').pack(anchor='w', padx=10, pady=5)
-        username_entry = tk.Entry(dialog, font=('Arial', 10), width=20)
-        username_entry.insert(0, user_data[0])
-        username_entry.pack(padx=10, pady=5)
+        dialog.geometry("300x180")
+        dialog.configure(bg=self.colors['bg_primary'])
         
         # PIN
-        tk.Label(dialog, text="4-Digit PIN:", font=('Arial', 10), bg='#f0f0f0').pack(anchor='w', padx=10, pady=5)
-        pin_entry = tk.Entry(dialog, font=('Arial', 10), width=20, show='*')
-        pin_entry.insert(0, user_data[1])
+        tk.Label(dialog, text="4-Digit PIN:", font=('Arial', 10, 'bold'), 
+                bg=self.colors['bg_primary'], fg=self.colors['text_primary']).pack(anchor='w', padx=10, pady=5)
+        pin_entry = tk.Entry(dialog, font=('Arial', 10), width=20, show='*',
+                            relief='solid', bd=1, bg=self.colors['bg_primary'],
+                            fg=self.colors['text_primary'])
+        pin_entry.insert(0, user_data[0])
         pin_entry.pack(padx=10, pady=5)
         
         # Admin checkbox
-        is_admin_var = tk.BooleanVar(value=bool(user_data[2]))
-        admin_check = tk.Checkbutton(dialog, text="Administrator", variable=is_admin_var, bg='#f0f0f0')
+        is_admin_var = tk.BooleanVar(value=bool(user_data[1]))
+        admin_check = tk.Checkbutton(dialog, text="Administrator", variable=is_admin_var, 
+                                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
         admin_check.pack(anchor='w', padx=10, pady=5)
         
         # Buttons
-        button_frame = tk.Frame(dialog, bg='#f0f0f0')
+        button_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
         button_frame.pack(fill='x', padx=10, pady=10)
         
         def save_changes():
-            new_username = username_entry.get().strip()
             new_pin = pin_entry.get().strip()
             
-            if not new_username or not new_pin:
-                messagebox.showerror("Error", "Please enter both username and PIN")
+            if not new_pin:
+                messagebox.showerror("Error", "Please enter a PIN")
                 return
             
             if len(new_pin) != 4 or not new_pin.isdigit():
                 messagebox.showerror("Error", "PIN must be exactly 4 digits")
                 return
             
+            # Check if new PIN is already in use by another user
+            if new_pin != old_pin:
+                self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', (new_pin,))
+                if self.cursor.fetchone()[0] > 0:
+                    messagebox.showerror("Error", "This PIN is already in use")
+                    return
+            
             try:
+                # Update PIN and admin status, use PIN as username for compatibility
                 self.cursor.execute('''
                     UPDATE users SET username = ?, pin = ?, is_admin = ?
-                    WHERE username = ?
-                ''', (new_username, new_pin, int(is_admin_var.get()), username))
+                    WHERE pin = ?
+                ''', (new_pin, new_pin, int(is_admin_var.get()), old_pin))
                 self.conn.commit()
                 messagebox.showinfo("Success", "User updated successfully!")
                 dialog.destroy()
                 self.load_users()
             except sqlite3.IntegrityError:
-                messagebox.showerror("Error", "Username already exists")
+                messagebox.showerror("Error", "This PIN is already in use")
         
         tk.Button(button_frame, text="Save", font=('Arial', 10, 'bold'),
                  bg=self.colors['bg_success'], fg=self.colors['text_button'], 
@@ -1024,45 +1170,265 @@ class PizzaPOSApp:
             messagebox.showwarning("No Selection", "Please select a user to delete")
             return
         
-        username = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        pin_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        pin = pin_text.replace('PIN: ', '').strip()
         
-        if username == self.current_user['username']:
+        if pin == self.current_user['pin']:
             messagebox.showerror("Error", "You cannot delete your own account")
             return
         
-        if messagebox.askyesno("Delete User", f"Are you sure you want to delete user '{username}'?"):
-            self.cursor.execute('DELETE FROM users WHERE username = ?', (username,))
+        if messagebox.askyesno("Delete User", f"Are you sure you want to delete user with PIN '{pin}'?"):
+            self.cursor.execute('DELETE FROM users WHERE pin = ?', (pin,))
             self.conn.commit()
             messagebox.showinfo("Success", "User deleted successfully!")
             self.load_users()
     
     def reset_password(self):
-        """Reset user password"""
+        """Reset user PIN"""
         selection = self.user_listbox.curselection()
         if not selection:
-            messagebox.showwarning("No Selection", "Please select a user to reset password")
+            messagebox.showwarning("No Selection", "Please select a user to reset PIN")
             return
         
-        username = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        pin_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        old_pin = pin_text.replace('PIN: ', '').strip()
         
-        new_pin = simpledialog.askstring("Reset Password", f"Enter new 4-digit PIN for {username}:")
+        new_pin = simpledialog.askstring("Reset PIN", f"Enter new 4-digit PIN for user with PIN {old_pin}:")
         if new_pin and len(new_pin) == 4 and new_pin.isdigit():
-            self.cursor.execute('UPDATE users SET pin = ? WHERE username = ?', (new_pin, username))
+            # Check if new PIN is already in use
+            if new_pin != old_pin:
+                self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', (new_pin,))
+                if self.cursor.fetchone()[0] > 0:
+                    messagebox.showerror("Error", "This PIN is already in use")
+                    return
+            self.cursor.execute('UPDATE users SET pin = ?, username = ? WHERE pin = ?', (new_pin, new_pin, old_pin))
             self.conn.commit()
-            messagebox.showinfo("Success", f"Password reset for {username}")
+            messagebox.showinfo("Success", f"PIN reset for user with PIN {old_pin}")
         elif new_pin:
             messagebox.showerror("Error", "PIN must be exactly 4 digits")
     
     def configure_prices(self):
         """Configure system prices"""
-        messagebox.showinfo("Price Configuration", 
-                           "Price configuration feature would be implemented here.\n"
-                           "This would allow admins to modify pizza, topping, and drink prices.")
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Configure Prices")
+        dialog.geometry("800x700")
+        dialog.configure(bg=self.colors['bg_primary'])
+        
+        # Main scrollable frame
+        main_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Title
+        title_label = tk.Label(main_frame, text="Price Configuration", 
+                              font=('Arial', 18, 'bold'), bg=self.colors['bg_primary'], 
+                              fg=self.colors['text_primary'])
+        title_label.pack(pady=(0, 20))
+        
+        # Create a canvas and scrollbar for scrolling
+        canvas = tk.Canvas(main_frame, bg=self.colors['bg_primary'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=self.colors['bg_primary'])
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Price entry fields storage
+        price_entries = {}
+        
+        # Pizza Prices Section
+        pizza_frame = tk.LabelFrame(scrollable_frame, text="Pizza Prices", 
+                                    font=('Arial', 12, 'bold'), bg=self.colors['bg_primary'],
+                                    fg=self.colors['text_primary'], relief='solid', bd=1)
+        pizza_frame.pack(fill='x', padx=10, pady=10)
+        
+        pizza_inner = tk.Frame(pizza_frame, bg=self.colors['bg_primary'])
+        pizza_inner.pack(fill='x', padx=10, pady=10)
+        
+        for size in ['small', 'medium', 'large']:
+            row = tk.Frame(pizza_inner, bg=self.colors['bg_primary'])
+            row.pack(fill='x', pady=5)
+            
+            tk.Label(row, text=f"{size.title()} Pizza:", font=('Arial', 10, 'bold'),
+                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=15, anchor='w').pack(side='left')
+            tk.Label(row, text="$", font=('Arial', 10), bg=self.colors['bg_primary'],
+                    fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
+            
+            entry = tk.Entry(row, font=('Arial', 10), width=10, relief='solid', bd=1,
+                           bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
+            entry.insert(0, str(self.pizza_prices.get(size, '0.00')))
+            entry.pack(side='left')
+            price_entries[('pizza', size)] = entry
+        
+        # Topping Prices Section
+        topping_frame = tk.LabelFrame(scrollable_frame, text="Topping Prices", 
+                                      font=('Arial', 12, 'bold'), bg=self.colors['bg_primary'],
+                                      fg=self.colors['text_primary'], relief='solid', bd=1)
+        topping_frame.pack(fill='x', padx=10, pady=10)
+        
+        topping_inner = tk.Frame(topping_frame, bg=self.colors['bg_primary'])
+        topping_inner.pack(fill='x', padx=10, pady=10)
+        
+        for topping in sorted(self.topping_prices.keys()):
+            row = tk.Frame(topping_inner, bg=self.colors['bg_primary'])
+            row.pack(fill='x', pady=5)
+            
+            tk.Label(row, text=f"{topping}:", font=('Arial', 10, 'bold'),
+                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=15, anchor='w').pack(side='left')
+            tk.Label(row, text="$", font=('Arial', 10), bg=self.colors['bg_primary'],
+                    fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
+            
+            entry = tk.Entry(row, font=('Arial', 10), width=10, relief='solid', bd=1,
+                           bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
+            entry.insert(0, str(self.topping_prices.get(topping, '0.00')))
+            entry.pack(side='left')
+            price_entries[('topping', topping)] = entry
+        
+        # Drink Prices Section
+        drink_frame = tk.LabelFrame(scrollable_frame, text="Drink Prices", 
+                                   font=('Arial', 12, 'bold'), bg=self.colors['bg_primary'],
+                                   fg=self.colors['text_primary'], relief='solid', bd=1)
+        drink_frame.pack(fill='x', padx=10, pady=10)
+        
+        drink_inner = tk.Frame(drink_frame, bg=self.colors['bg_primary'])
+        drink_inner.pack(fill='x', padx=10, pady=10)
+        
+        for drink in sorted(self.drink_prices.keys()):
+            row = tk.Frame(drink_inner, bg=self.colors['bg_primary'])
+            row.pack(fill='x', pady=5)
+            
+            tk.Label(row, text=f"{drink}:", font=('Arial', 10, 'bold'),
+                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=15, anchor='w').pack(side='left')
+            tk.Label(row, text="$", font=('Arial', 10), bg=self.colors['bg_primary'],
+                    fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
+            
+            entry = tk.Entry(row, font=('Arial', 10), width=10, relief='solid', bd=1,
+                           bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
+            entry.insert(0, str(self.drink_prices.get(drink, '0.00')))
+            entry.pack(side='left')
+            price_entries[('drink', drink)] = entry
+        
+        # Tax Rate Section
+        tax_frame = tk.LabelFrame(scrollable_frame, text="Tax Rate", 
+                                 font=('Arial', 12, 'bold'), bg=self.colors['bg_primary'],
+                                 fg=self.colors['text_primary'], relief='solid', bd=1)
+        tax_frame.pack(fill='x', padx=10, pady=10)
+        
+        tax_inner = tk.Frame(tax_frame, bg=self.colors['bg_primary'])
+        tax_inner.pack(fill='x', padx=10, pady=10)
+        
+        tax_row = tk.Frame(tax_inner, bg=self.colors['bg_primary'])
+        tax_row.pack(fill='x', pady=5)
+        
+        tk.Label(tax_row, text="Tax Rate (decimal):", font=('Arial', 10, 'bold'),
+                bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=15, anchor='w').pack(side='left')
+        tk.Label(tax_row, text="", font=('Arial', 10), bg=self.colors['bg_primary'],
+                fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
+        
+        tax_entry = tk.Entry(tax_row, font=('Arial', 10), width=10, relief='solid', bd=1,
+                            bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
+        tax_entry.insert(0, str(self.tax_rate))
+        tax_entry.pack(side='left')
+        price_entries[('tax', 'rate')] = tax_entry
+        
+        tk.Label(tax_row, text=f" (Current: {float(self.tax_rate) * 100:.1f}%)", 
+                font=('Arial', 9), bg=self.colors['bg_primary'],
+                fg=self.colors['text_secondary']).pack(side='left', padx=5)
+        
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Buttons
+        button_frame = tk.Frame(dialog, bg=self.colors['bg_primary'])
+        button_frame.pack(fill='x', padx=20, pady=20)
+        
+        def save_prices():
+            """Save all prices to database"""
+            try:
+                errors = []
+                
+                # Validate and save all prices
+                for (category, item_name), entry in price_entries.items():
+                    try:
+                        value = entry.get().strip()
+                        if not value:
+                            errors.append(f"{item_name}: Empty value")
+                            continue
+                        
+                        price_decimal = Decimal(value)
+                        if price_decimal < 0:
+                            errors.append(f"{item_name}: Negative value not allowed")
+                            continue
+                        
+                        # Update or insert price
+                        self.cursor.execute('''
+                            INSERT INTO prices (category, item_name, price)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(category, item_name) DO UPDATE SET
+                                price = excluded.price,
+                                updated_at = CURRENT_TIMESTAMP
+                        ''', (category, item_name, float(price_decimal)))
+                        
+                    except ValueError:
+                        errors.append(f"{item_name}: Invalid number format")
+                    except Exception as e:
+                        errors.append(f"{item_name}: {str(e)}")
+                
+                if errors:
+                    error_msg = "Some prices could not be saved:\n\n" + "\n".join(errors)
+                    messagebox.showerror("Save Errors", error_msg)
+                    return
+                
+                self.conn.commit()
+                
+                # Reload prices
+                self.load_prices_from_database()
+                
+                messagebox.showinfo("Success", 
+                                   "Prices updated successfully!\n\n"
+                                   "Note: New prices will be applied to all new orders.\n"
+                                   "Existing items in carts will use the old prices until the cart is cleared.")
+                dialog.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save prices: {str(e)}")
+        
+        tk.Button(button_frame, text="Save Prices", font=('Arial', 12, 'bold'),
+                 bg=self.colors['bg_success'], fg=self.colors['text_button'], 
+                 relief='raised', bd=2, command=save_prices,
+                 activebackground=self.colors['bg_success'],
+                 activeforeground=self.colors['text_button'],
+                 padx=20, pady=10).pack(side='right', padx=10)
+        
+        tk.Button(button_frame, text="Cancel", font=('Arial', 12),
+                 bg=self.colors['bg_danger'], fg=self.colors['text_button'], 
+                 relief='raised', bd=2, command=dialog.destroy,
+                 activebackground=self.colors['bg_danger'],
+                 activeforeground=self.colors['text_button'],
+                 padx=20, pady=10).pack(side='right', padx=10)
+        
+        # Bind mousewheel to canvas (works on Windows and macOS)
+        def on_mousewheel(event):
+            # Handle both Windows (event.delta) and macOS/Unix (event.delta)
+            if event.num == 4 or (hasattr(event, 'delta') and event.delta < 0):
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5 or (hasattr(event, 'delta') and event.delta > 0):
+                canvas.yview_scroll(1, "units")
+        
+        # Bind for different platforms
+        canvas.bind_all("<MouseWheel>", on_mousewheel)  # Windows
+        canvas.bind_all("<Button-4>", on_mousewheel)     # macOS/Unix scroll up
+        canvas.bind_all("<Button-5>", on_mousewheel)     # macOS/Unix scroll down
     
     def view_orders(self):
         """View order history"""
         self.cursor.execute('''
-            SELECT o.id, u.username, o.total, o.created_at
+            SELECT o.id, u.pin, o.total, o.created_at
             FROM orders o
             JOIN users u ON o.user_id = u.id
             ORDER BY o.created_at DESC
@@ -1084,14 +1450,14 @@ class PizzaPOSApp:
         orders_frame.pack(fill='both', expand=True, padx=10, pady=10)
         
         # Headers
-        headers = ["Order ID", "User", "Total", "Date"]
+        headers = ["Order ID", "User PIN", "Total", "Date"]
         for i, header in enumerate(headers):
             tk.Label(orders_frame, text=header, font=('Arial', 10, 'bold')).grid(row=0, column=i, padx=5, pady=5)
         
         # Order rows
-        for row, (order_id, username, total, created_at) in enumerate(orders, 1):
+        for row, (order_id, user_pin, total, created_at) in enumerate(orders, 1):
             tk.Label(orders_frame, text=str(order_id)).grid(row=row, column=0, padx=5, pady=2)
-            tk.Label(orders_frame, text=username).grid(row=row, column=1, padx=5, pady=2)
+            tk.Label(orders_frame, text=user_pin).grid(row=row, column=1, padx=5, pady=2)
             tk.Label(orders_frame, text=f"${total:.2f}").grid(row=row, column=2, padx=5, pady=2)
             tk.Label(orders_frame, text=created_at).grid(row=row, column=3, padx=5, pady=2)
     
