@@ -9,6 +9,7 @@ on:
       - '*.spec'
       - 'build_executable.bat'
       - 'pizza_icon.ico'
+      - 'create_icon.py'
   release:
     types: [created]
 
@@ -25,15 +26,23 @@ jobs:
       with:
         python-version: '3.11'
         
-    - name: Install PyInstaller
-      run: python -m pip install pyinstaller
+    - name: Install dependencies
+      run: |
+        python -m pip install pyinstaller
+        python -m pip install Pillow
       
     - name: Check for icon file
       shell: cmd
       run: |
         if not exist "pizza_icon.ico" (
           echo Creating icon file...
-          python create_icon.py
+          if exist "create_icon.py" (
+            python create_icon.py
+          ) else (
+            echo WARNING: create_icon.py not found, but icon is optional. Continuing...
+          )
+        ) else (
+          echo Icon file found.
         )
       
     - name: Build executable
