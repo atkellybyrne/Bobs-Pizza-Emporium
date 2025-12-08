@@ -21,6 +21,24 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Verify files and working directory
+      shell: cmd
+      run: |
+        echo Current directory:
+        cd
+        echo.
+        echo Listing files in root:
+        dir /b
+        echo.
+        echo Checking for required files:
+        if exist "pizza_pos.spec" (echo [OK] pizza_pos.spec found) else (echo [ERROR] pizza_pos.spec NOT found && exit /b 1)
+        if exist "pizza_icon.ico" (echo [OK] pizza_icon.ico found) else (echo [WARN] pizza_icon.ico NOT found)
+        if exist "launch.py" (echo [OK] launch.py found) else (echo [ERROR] launch.py NOT found && exit /b 1)
+        if exist "pizza_pos_app.py" (echo [OK] pizza_pos_app.py found) else (echo [ERROR] pizza_pos_app.py NOT found && exit /b 1)
+        if exist "create_icon.py" (echo [OK] create_icon.py found) else (echo [INFO] create_icon.py NOT found)
+        echo.
+        echo All required files verified!
+      
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -46,7 +64,29 @@ jobs:
         )
       
     - name: Build executable
-      run: pyinstaller pizza_pos.spec
+      shell: cmd
+      run: |
+        echo Building from directory:
+        cd
+        echo.
+        echo Verifying spec file exists:
+        if not exist "pizza_pos.spec" (
+          echo ERROR: pizza_pos.spec not found in current directory!
+          exit /b 1
+        )
+        echo.
+        echo Running: pyinstaller pizza_pos.spec
+        pyinstaller pizza_pos.spec
+        if errorlevel 1 (
+          echo.
+          echo Build failed! Checking for error details...
+          if exist "build\pizza_pos\warn-pizza_pos.txt" (
+            echo.
+            echo Warnings/Errors from PyInstaller:
+            type build\pizza_pos\warn-pizza_pos.txt
+          )
+          exit /b 1
+        )
         
     - name: Upload executable
       uses: actions/upload-artifact@v4
