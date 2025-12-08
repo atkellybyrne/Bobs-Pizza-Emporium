@@ -9,13 +9,23 @@ import os
 import subprocess
 import platform
 
+def safe_input(prompt):
+    """Safely get input, only if stdin is available (not in GUI mode)"""
+    try:
+        if sys.stdin.isatty():
+            return input(prompt)
+    except (AttributeError, OSError):
+        pass
+    # If no stdin available, just return (for GUI mode)
+    return None
+
 def check_python_version():
     """Check if Python version is compatible"""
     if sys.version_info < (3, 6):
         print("ERROR: Python 3.6 or higher is required")
         print(f"   Current version: {sys.version}")
         print("\nPlease download and install Python from: https://python.org")
-        input("\nPress Enter to exit...")
+        safe_input("\nPress Enter to exit...")
         return False
     return True
 
@@ -31,7 +41,7 @@ def check_tkinter():
         print("   macOS: Install Python from python.org (not Homebrew)")
         print("   Linux: Install python3-tk package")
         print("\nDownload Python from: https://python.org")
-        input("\nPress Enter to exit...")
+        safe_input("\nPress Enter to exit...")
         return False
 
 def check_dependencies():
@@ -48,7 +58,7 @@ def check_dependencies():
     if missing_modules:
         print(f"ERROR: Missing required modules: {', '.join(missing_modules)}")
         print("   This should not happen with a standard Python installation")
-        input("\nPress Enter to exit...")
+        safe_input("\nPress Enter to exit...")
         return False
     
     return True
@@ -62,11 +72,13 @@ def run_application():
         app.run()
     except Exception as e:
         print(f"ERROR: Failed to start application: {e}")
+        import traceback
+        traceback.print_exc()
         print("\nTroubleshooting:")
         print("   1. Make sure all files are in the same folder")
         print("   2. Check that pizza_pos_app.py is not corrupted")
         print("   3. Try running: python pizza_pos_app.py")
-        input("\nPress Enter to exit...")
+        safe_input("\nPress Enter to exit...")
         return False
     
     return True
@@ -117,5 +129,7 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-        input("\nPress Enter to exit...")
+        import traceback
+        traceback.print_exc()
+        safe_input("\nPress Enter to exit...")
         sys.exit(1)
