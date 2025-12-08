@@ -63,7 +63,25 @@ class PizzaPOSApp:
     
     def init_database(self):
         """Initialize SQLite database with required tables"""
-        self.conn = sqlite3.connect('pizza_pos.db')
+        # Get a writable path for the database
+        # Use user's AppData directory on Windows, or current directory if writable
+        if sys.platform == 'win32':
+            appdata = os.getenv('APPDATA')
+            if appdata:
+                db_dir = os.path.join(appdata, 'BobsPizzaEmporium')
+                os.makedirs(db_dir, exist_ok=True)
+                db_path = os.path.join(db_dir, 'pizza_pos.db')
+            else:
+                # Fallback to current directory
+                db_path = 'pizza_pos.db'
+        else:
+            # For macOS/Linux, use user's home directory
+            home = os.path.expanduser('~')
+            db_dir = os.path.join(home, '.bobs_pizza_emporium')
+            os.makedirs(db_dir, exist_ok=True)
+            db_path = os.path.join(db_dir, 'pizza_pos.db')
+        
+        self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
         
         # Create users table
