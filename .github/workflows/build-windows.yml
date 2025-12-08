@@ -21,13 +21,40 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Verify files and working directory
+    - name: Find project directory
       shell: cmd
       run: |
         echo Current directory:
         cd
         echo.
         echo Listing files in root:
+        dir /b
+        echo.
+        echo Looking for project files...
+        if exist "bobs_pizza_emporium\pizza_pos.spec" (
+          echo Found files in bobs_pizza_emporium subdirectory
+          set PROJECT_DIR=bobs_pizza_emporium
+        ) else if exist "pizza_pos.spec" (
+          echo Found files in root directory
+          set PROJECT_DIR=.
+        ) else (
+          echo ERROR: Could not find pizza_pos.spec in root or bobs_pizza_emporium subdirectory
+          exit /b 1
+        )
+        echo Project directory: %PROJECT_DIR%
+        echo PROJECT_DIR=%PROJECT_DIR%>> %GITHUB_ENV%
+      
+    - name: Verify files and working directory
+      shell: cmd
+      run: |
+        echo Current directory:
+        cd
+        echo.
+        echo Project directory: %PROJECT_DIR%
+        cd %PROJECT_DIR%
+        echo Changed to: %CD%
+        echo.
+        echo Listing files:
         dir /b
         echo.
         echo Checking for required files:
@@ -52,6 +79,7 @@ jobs:
     - name: Check for icon file
       shell: cmd
       run: |
+        cd %PROJECT_DIR%
         if not exist "pizza_icon.ico" (
           echo Creating icon file...
           if exist "create_icon.py" (
@@ -66,8 +94,8 @@ jobs:
     - name: Build executable
       shell: cmd
       run: |
-        echo Building from directory:
-        cd
+        cd %PROJECT_DIR%
+        echo Building from directory: %CD%
         echo.
         echo Verifying spec file exists:
         if not exist "pizza_pos.spec" (
@@ -92,13 +120,13 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: BobsPizzaEmporium-Windows
-        path: dist/BobsPizzaEmporium.exe
+        path: ${{ env.PROJECT_DIR }}/dist/BobsPizzaEmporium.exe
         
     - name: Create release (if triggered by release)
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/BobsPizzaEmporium.exe
+        files: ${{ env.PROJECT_DIR }}/dist/BobsPizzaEmporium.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
