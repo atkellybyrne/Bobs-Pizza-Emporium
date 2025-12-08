@@ -1,0 +1,55 @@
+name: Build Windows Executable
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+  push:
+    branches: [ main, master ]
+    paths:
+      - '*.py'
+      - '*.spec'
+      - 'build_executable.bat'
+      - 'pizza_icon.ico'
+  release:
+    types: [created]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install PyInstaller
+      run: python -m pip install pyinstaller
+      
+    - name: Check for icon file
+      run: |
+        if not exist "pizza_icon.ico" (
+          echo "Creating icon file..."
+          python create_icon.py
+        )
+      
+    - name: Build executable
+      run: |
+        pyinstaller pizza_pos.spec
+        
+    - name: Upload executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: BobsPizzaEmporium-Windows
+        path: dist/BobsPizzaEmporium.exe
+        
+    - name: Create release (if triggered by release)
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/BobsPizzaEmporium.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
