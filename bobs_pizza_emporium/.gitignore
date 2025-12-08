@@ -1,21 +1,34 @@
-# Executable and build artifacts
-dist/
+# Build artifacts
 build/
+dist/
+*.spec.bak
+
+# Python cache
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
 
-# Database (optional - remove if you want to track it)
-# pizza_pos.db
+# Virtual environments
+venv/
+env/
+ENV/
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database (optional - remove if you want to commit it)
+# pizza_pos.db
+
+# Logs
+*.log
 
