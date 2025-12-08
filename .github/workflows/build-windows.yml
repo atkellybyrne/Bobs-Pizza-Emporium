@@ -29,15 +29,15 @@ jobs:
       run: python -m pip install pyinstaller
       
     - name: Check for icon file
+      shell: cmd
       run: |
         if not exist "pizza_icon.ico" (
-          echo "Creating icon file..."
+          echo Creating icon file...
           python create_icon.py
         )
       
     - name: Build executable
-      run: |
-        pyinstaller pizza_pos.spec
+      run: pyinstaller pizza_pos.spec
         
     - name: Upload executable
       uses: actions/upload-artifact@v4
