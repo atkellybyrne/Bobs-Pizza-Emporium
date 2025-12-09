@@ -135,30 +135,3 @@ The application uses SQLite for data storage:
 
 See `bobs_pizza_emporium/BUILD_EXECUTABLE.md` for instructions on creating standalone executables for Windows, macOS, and Linux.
 
-## Features in Detail
-
-### Size-Based Topping Prices
-When configuring topping prices:
-- Set the **Small** price (base price)
-- **Medium** automatically calculates as Small × 1.2
-- **Large** automatically calculates as Small × 1.44
-- Changing any size recalculates the others to maintain the 20% increment structure
-
-### Cart Persistence
-- Carts are saved to the database when you logout
-- Each PIN maintains its own cart
-- Cart is cleared only when an order is processed
-- Allows employees to pause and resume work without losing their current order
-
-### Order Timestamps
-- Orders are timestamped with accurate date and time
-- Displayed in readable format: `YYYY-MM-DD HH:MM:SS`
-- Stored in database for historical tracking
-
-## Support
-
-For issues or questions, please refer to the code comments or contact the development team.
-
-## License
-
-This application is proprietary software for Bob's Pizza Emporium.
