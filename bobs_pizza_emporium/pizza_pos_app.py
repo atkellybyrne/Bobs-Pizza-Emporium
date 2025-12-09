@@ -90,10 +90,17 @@ class PizzaPOSApp:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 pin TEXT NOT NULL,
+                name TEXT,
                 is_admin BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Add name column if it doesn't exist (for existing databases)
+        try:
+            self.cursor.execute('ALTER TABLE users ADD COLUMN name TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         
         # Create orders table
         self.cursor.execute('''
@@ -115,9 +122,110 @@ class PizzaPOSApp:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 category TEXT NOT NULL,
                 item_name TEXT NOT NULL,
+                size TEXT,
                 price DECIMAL(10,2) NOT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(category, item_name)
+                UNIQUE(category, item_name, size)
+            )
+        ''')
+        
+        # Add size column if it doesn't exist (for existing databases)
+        try:
+            self.cursor.execute('ALTER TABLE prices ADD COLUMN size TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        # Fix unique constraint issue: SQLite doesn't allow dropping table-level UNIQUE constraints
+        # We need to recreate the table if it has the old constraint
+        try:
+            # Check if table exists and get its schema
+            self.cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='prices'")
+            table_sql = self.cursor.fetchone()
+            
+            # Check if we need to migrate (old constraint without size, or constraint on category+item_name only)
+            needs_migration = False
+            if table_sql and table_sql[0]:
+                sql_str = table_sql[0].upper()
+                # Check if it has UNIQUE constraint on just (category, item_name) without size
+                if 'UNIQUE(CATEGORY, ITEM_NAME)' in sql_str or 'UNIQUE(ITEM_NAME, CATEGORY)' in sql_str:
+                    if 'UNIQUE(CATEGORY, ITEM_NAME, SIZE)' not in sql_str:
+                        needs_migration = True
+            
+            if needs_migration:
+                # Backup existing data
+                self.cursor.execute('''
+                    CREATE TABLE prices_backup AS 
+                    SELECT * FROM prices
+                ''')
+                
+                # Drop old table
+                self.cursor.execute('DROP TABLE prices')
+                
+                # Recreate with correct constraint
+                self.cursor.execute('''
+                    CREATE TABLE prices (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT NOT NULL,
+                        item_name TEXT NOT NULL,
+                        size TEXT,
+                        price DECIMAL(10,2) NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(category, item_name, size)
+                    )
+                ''')
+                
+                # Restore data (handle case where size column might not exist in backup)
+                try:
+                    self.cursor.execute('''
+                        INSERT INTO prices (category, item_name, size, price, updated_at)
+                        SELECT category, item_name, size, price, updated_at FROM prices_backup
+                    ''')
+                except sqlite3.OperationalError:
+                    # If size column doesn't exist in backup, insert without it
+                    self.cursor.execute('''
+                        INSERT INTO prices (category, item_name, size, price, updated_at)
+                        SELECT category, item_name, NULL, price, updated_at FROM prices_backup
+                    ''')
+                
+                # Drop backup table
+                self.cursor.execute('DROP TABLE prices_backup')
+                self.conn.commit()
+                
+        except sqlite3.OperationalError as e:
+            # If backup table exists from previous failed migration, clean it up
+            try:
+                self.cursor.execute('DROP TABLE IF EXISTS prices_backup')
+                self.conn.commit()
+            except:
+                pass
+        
+        # Drop any old indexes
+        try:
+            self.cursor.execute('DROP INDEX IF EXISTS prices_category_item_name')
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            self.cursor.execute('DROP INDEX IF EXISTS prices_category_item_name_size')
+        except sqlite3.OperationalError:
+            pass
+        
+        # Create unique index on (category, item_name, size)
+        # This handles NULL values properly
+        self.cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS prices_category_item_name_size 
+            ON prices(category, item_name, COALESCE(size, ''))
+        ''')
+        
+        # Create carts table for persisting carts per PIN
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS carts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                cart_data TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                UNIQUE(user_id)
             )
         ''')
         
@@ -125,16 +233,16 @@ class PizzaPOSApp:
         self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', ('1234',))
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute('''
-                INSERT INTO users (username, pin, is_admin) 
-                VALUES ('1234', '1234', 1)
+                INSERT INTO users (username, pin, name, is_admin) 
+                VALUES ('1234', '1234', 'Admin', 1)
             ''')
         
         # Create default regular user if not exists (PIN: 5678)
         self.cursor.execute('SELECT COUNT(*) FROM users WHERE pin = ?', ('5678',))
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute('''
-                INSERT INTO users (username, pin, is_admin) 
-                VALUES ('5678', '5678', 0)
+                INSERT INTO users (username, pin, name, is_admin) 
+                VALUES ('5678', '5678', 'Employee', 0)
             ''')
         
         # Initialize default prices if not exists
@@ -144,74 +252,212 @@ class PizzaPOSApp:
     
     def init_default_prices(self):
         """Initialize default prices in database if they don't exist"""
-        # Default pizza prices
+        # Default pizza prices (no size needed, item_name is the size)
         default_pizza = [
-            ('pizza', 'small', '12.99'),
-            ('pizza', 'medium', '15.99'),
-            ('pizza', 'large', '18.99')
+            ('pizza', 'small', None, '12.99'),
+            ('pizza', 'medium', None, '15.99'),
+            ('pizza', 'large', None, '18.99')
         ]
         
-        # Default topping prices
+        # Default topping prices - different prices per size
+        # Small = base price, Medium = 1.2x (20% increase), Large = 1.44x (20% increase from medium)
         default_toppings = [
-            ('topping', 'Pepperoni', '1.50'),
-            ('topping', 'Sausage', '1.50'),
-            ('topping', 'Bacon', '2.00'),
-            ('topping', 'Pineapple', '1.00'),
-            ('topping', 'Mushrooms', '1.00'),
-            ('topping', 'Onions', '1.00')
+            # Small size toppings (base prices)
+            ('topping', 'Pepperoni', 'small', '1.50'),
+            ('topping', 'Sausage', 'small', '1.50'),
+            ('topping', 'Bacon', 'small', '2.00'),
+            ('topping', 'Pineapple', 'small', '1.00'),
+            ('topping', 'Mushrooms', 'small', '1.00'),
+            ('topping', 'Onions', 'small', '1.00'),
+            # Medium size toppings (20% increase from small)
+            ('topping', 'Pepperoni', 'medium', '1.80'),
+            ('topping', 'Sausage', 'medium', '1.80'),
+            ('topping', 'Bacon', 'medium', '2.40'),
+            ('topping', 'Pineapple', 'medium', '1.20'),
+            ('topping', 'Mushrooms', 'medium', '1.20'),
+            ('topping', 'Onions', 'medium', '1.20'),
+            # Large size toppings (20% increase from medium = 44% from small)
+            ('topping', 'Pepperoni', 'large', '2.16'),
+            ('topping', 'Sausage', 'large', '2.16'),
+            ('topping', 'Bacon', 'large', '2.88'),
+            ('topping', 'Pineapple', 'large', '1.44'),
+            ('topping', 'Mushrooms', 'large', '1.44'),
+            ('topping', 'Onions', 'large', '1.44'),
         ]
         
-        # Default drink prices
+        # Default drink prices (no size)
         default_drinks = [
-            ('drink', 'Coca-Cola', '2.50'),
-            ('drink', 'Pepsi', '2.50'),
-            ('drink', 'Sprite', '2.50'),
-            ('drink', 'Water', '1.50'),
-            ('drink', 'Orange Juice', '3.00')
+            ('drink', 'Coca-Cola', None, '2.50'),
+            ('drink', 'Pepsi', None, '2.50'),
+            ('drink', 'Sprite', None, '2.50'),
+            ('drink', 'Water', None, '1.50'),
+            ('drink', 'Orange Juice', None, '3.00')
         ]
         
-        # Default tax rate
-        default_tax = [('tax', 'rate', '0.08')]
+        # Default tax rate (no size)
+        default_tax = [('tax', 'rate', None, '0.08')]
         
         # Insert all defaults
         all_defaults = default_pizza + default_toppings + default_drinks + default_tax
         
-        for category, item_name, price in all_defaults:
+        for category, item_name, size, price in all_defaults:
             self.cursor.execute('''
-                INSERT OR IGNORE INTO prices (category, item_name, price)
-                VALUES (?, ?, ?)
-            ''', (category, item_name, price))
+                INSERT OR IGNORE INTO prices (category, item_name, size, price)
+                VALUES (?, ?, ?, ?)
+            ''', (category, item_name, size, price))
+        
+        # Migrate old topping prices if they exist (without size)
+        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ? AND size IS NULL', ('topping',))
+        old_toppings = self.cursor.fetchall()
+        if old_toppings:
+            # Create size-based prices from old single prices
+            for item_name, price in old_toppings:
+                price_decimal = Decimal(str(price))
+                # Create prices for all sizes based on old price
+                for size in ['small', 'medium', 'large']:
+                    # Scale prices: small = 0.67x, medium = 1x, large = 1.33x
+                    multipliers = {'small': Decimal('0.67'), 'medium': Decimal('1.0'), 'large': Decimal('1.33')}
+                    new_price = (price_decimal * multipliers[size]).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    self.cursor.execute('''
+                        INSERT OR IGNORE INTO prices (category, item_name, size, price)
+                        VALUES (?, ?, ?, ?)
+                    ''', ('topping', item_name, size, float(new_price)))
+                # Delete old price without size
+                self.cursor.execute('DELETE FROM prices WHERE category = ? AND item_name = ? AND size IS NULL', 
+                                  ('topping', item_name))
     
     def load_prices_from_database(self):
         """Load prices from database"""
         # Load pizza prices
-        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('pizza',))
+        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ? AND size IS NULL', ('pizza',))
         pizza_data = self.cursor.fetchall()
         self.pizza_prices = {}
         for size, price in pizza_data:
             self.pizza_prices[size] = Decimal(str(price))
         
-        # Load topping prices
-        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('topping',))
+        # Load topping prices by size
+        self.cursor.execute('SELECT item_name, size, price FROM prices WHERE category = ? AND size IS NOT NULL', ('topping',))
         topping_data = self.cursor.fetchall()
         self.topping_prices = {}
-        for name, price in topping_data:
-            self.topping_prices[name] = Decimal(str(price))
+        for name, size, price in topping_data:
+            if name not in self.topping_prices:
+                self.topping_prices[name] = {}
+            # Ensure size is lowercase for consistency
+            size_lower = size.lower() if size else None
+            self.topping_prices[name][size_lower] = Decimal(str(price))
+        
+        print(f"DEBUG: Loaded topping prices: {self.topping_prices}")  # Debug line
+        
+        # If no toppings found with sizes, check for old format and migrate
+        if not self.topping_prices:
+            self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ? AND size IS NULL', ('topping',))
+            old_toppings = self.cursor.fetchall()
+            if old_toppings:
+                # Migrate old topping prices
+                for item_name, price in old_toppings:
+                    price_decimal = Decimal(str(price))
+                    # Create prices for all sizes based on old price
+                    # Use old price as small, then 20% increase for medium, 20% increase for large
+                    for size in ['small', 'medium', 'large']:
+                        # Scale prices: small = 1x (base), medium = 1.2x (20% increase), large = 1.44x (20% from medium)
+                        multipliers = {'small': Decimal('1.0'), 'medium': Decimal('1.2'), 'large': Decimal('1.44')}
+                        new_price = (price_decimal * multipliers[size]).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        self.cursor.execute('''
+                            INSERT OR IGNORE INTO prices (category, item_name, size, price)
+                            VALUES (?, ?, ?, ?)
+                        ''', ('topping', item_name, size, float(new_price)))
+                        if item_name not in self.topping_prices:
+                            self.topping_prices[item_name] = {}
+                        self.topping_prices[item_name][size] = new_price
+                    # Delete old price without size
+                    self.cursor.execute('DELETE FROM prices WHERE category = ? AND item_name = ? AND size IS NULL', 
+                                      ('topping', item_name))
+                self.conn.commit()
+        
+        # If still no toppings, ensure we have at least the default ones
+        if not self.topping_prices:
+            # Check if we need to initialize default prices
+            self.cursor.execute('SELECT COUNT(*) FROM prices WHERE category = ?', ('topping',))
+            topping_count = self.cursor.fetchone()[0]
+            if topping_count == 0:
+                # No toppings at all, initialize defaults
+                self.init_default_prices()
+                self.conn.commit()
+            # Reload topping prices
+            self.cursor.execute('SELECT item_name, size, price FROM prices WHERE category = ? AND size IS NOT NULL', ('topping',))
+            topping_data = self.cursor.fetchall()
+            for name, size, price in topping_data:
+                if name not in self.topping_prices:
+                    self.topping_prices[name] = {}
+                size_lower = size.lower() if size else None
+                self.topping_prices[name][size_lower] = Decimal(str(price))
+        
+        # Ensure all toppings have prices for all sizes (fix any missing sizes)
+        self.ensure_all_topping_sizes()
         
         # Load drink prices
-        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('drink',))
+        self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ? AND size IS NULL', ('drink',))
         drink_data = self.cursor.fetchall()
         self.drink_prices = {}
         for name, price in drink_data:
             self.drink_prices[name] = Decimal(str(price))
         
         # Load tax rate
-        self.cursor.execute('SELECT price FROM prices WHERE category = ? AND item_name = ?', ('tax', 'rate'))
+        self.cursor.execute('SELECT price FROM prices WHERE category = ? AND item_name = ? AND size IS NULL', ('tax', 'rate'))
         tax_data = self.cursor.fetchone()
         if tax_data:
             self.tax_rate = Decimal(str(tax_data[0]))
         else:
             self.tax_rate = Decimal('0.08')  # Default 8%
+    
+    def ensure_all_topping_sizes(self):
+        """Ensure all toppings have prices for all three sizes (small, medium, large)"""
+        required_sizes = ['small', 'medium', 'large']
+        needs_update = False
+        
+        for topping_name in list(self.topping_prices.keys()):
+            topping_sizes = set(self.topping_prices[topping_name].keys())
+            missing_sizes = [s for s in required_sizes if s not in topping_sizes]
+            
+            if missing_sizes:
+                # Find a reference price and size (prefer small, then medium, then large)
+                reference_price = None
+                ref_size = None
+                for size in ['small', 'medium', 'large']:
+                    if size in self.topping_prices[topping_name]:
+                        reference_price = self.topping_prices[topping_name][size]
+                        ref_size = size
+                        break
+                
+                if reference_price and ref_size:
+                    # Calculate base price (small) from reference size
+                    if ref_size == 'small':
+                        base_price = reference_price
+                    elif ref_size == 'medium':
+                        # Medium is 1.2x small, so small = medium / 1.2
+                        base_price = reference_price / Decimal('1.2')
+                    elif ref_size == 'large':
+                        # Large is 1.44x small, so small = large / 1.44
+                        base_price = reference_price / Decimal('1.44')
+                    else:
+                        base_price = None
+                    
+                    if base_price:
+                        # Calculate prices: small = base, medium = 1.2x, large = 1.44x
+                        multipliers = {'small': Decimal('1.0'), 'medium': Decimal('1.2'), 'large': Decimal('1.44')}
+                        for missing_size in missing_sizes:
+                            new_price = (base_price * multipliers[missing_size]).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        self.cursor.execute('''
+                            INSERT OR IGNORE INTO prices (category, item_name, size, price)
+                            VALUES (?, ?, ?, ?)
+                        ''', ('topping', topping_name, missing_size, float(new_price)))
+                        self.topping_prices[topping_name][missing_size] = new_price
+                        needs_update = True
+                        print(f"DEBUG: Created missing price for {topping_name} size {missing_size}: ${new_price}")
+        
+        if needs_update:
+            self.conn.commit()
+            print("DEBUG: Updated database with missing topping sizes")
     
     def show_login(self):
         """Display login screen"""
@@ -286,11 +532,19 @@ class PizzaPOSApp:
         user = self.cursor.fetchone()
         
         if user:
+            # Get user name if available
+            self.cursor.execute('SELECT name FROM users WHERE id = ?', (user[0],))
+            name_result = self.cursor.fetchone()
+            user_name = name_result[0] if name_result and name_result[0] else None
+            
             self.current_user = {
                 'id': user[0],
                 'pin': user[1],
-                'is_admin': bool(user[2])
+                'is_admin': bool(user[2]),
+                'name': user_name
             }
+            # Load saved cart for this user
+            self.load_cart_for_user()
             self.show_main_screen()
         else:
             messagebox.showerror("Error", "Invalid PIN")
@@ -314,7 +568,9 @@ class PizzaPOSApp:
         
         # User info
         user_type = "Admin" if self.current_user['is_admin'] else "Employee"
-        user_label = tk.Label(header_frame, text=f"PIN: {self.current_user['pin']} ({user_type})", 
+        user_name = self.current_user.get('name', '')
+        display_name = user_name if user_name else f"PIN: {self.current_user['pin']}"
+        user_label = tk.Label(header_frame, text=f"{display_name} ({user_type})", 
                              font=('Arial', 14, 'bold'), bg=self.colors['bg_header'], 
                              fg=self.colors['text_light'])
         user_label.pack(side='right', padx=20, pady=15)
@@ -449,6 +705,10 @@ class PizzaPOSApp:
                                activeforeground=self.colors['text_button'],
                                padx=15, pady=12)
         process_btn.pack(fill='x', padx=10, pady=15)
+        
+        # Update cart display if there are items in cart (from saved cart)
+        if self.cart:
+            self.update_cart_display()
     
     def show_admin_view(self, parent):
         """Display admin interface"""
@@ -626,7 +886,7 @@ class PizzaPOSApp:
         """Create custom pizza dialog inspired by the image design"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Pizza")
-        dialog.geometry("1000x700")
+        dialog.geometry("1400x900")
         dialog.configure(bg=self.colors['bg_primary'])
         
         # Header with user info (like in the image)
@@ -749,9 +1009,27 @@ class PizzaPOSApp:
         self.selected_toppings = {}
         self.topping_counts = {}
         
+        # Store price labels for updating (initialize before use)
+        self.topping_price_labels = {}
+        
         # Create topping buttons with +/- controls and icons (like in the image)
+        # Ensure topping_prices is initialized
+        if not hasattr(self, 'topping_prices') or not isinstance(self.topping_prices, dict):
+            self.topping_prices = {}
+        
         toppings = list(self.topping_prices.keys())
         print(f"DEBUG: Toppings list: {toppings}")  # Debug line
+        
+        # If no toppings available, show error message
+        if not toppings:
+            error_label = tk.Label(toppings_frame, text="No toppings available.\nPlease configure prices in admin settings.", 
+                                  font=('Arial', 14), bg=self.colors['bg_secondary'], 
+                                  fg=self.colors['text_accent'])
+            error_label.pack(expand=True)
+            # Still configure grid weights even if empty
+            toppings_grid.columnconfigure(0, weight=1)
+            toppings_grid.columnconfigure(1, weight=1)
+            return
         
         # Topping icons based on the image descriptions
         topping_icons = {
@@ -782,7 +1060,20 @@ class PizzaPOSApp:
             topping_label = tk.Label(topping_frame, text=topping, 
                                    font=('Arial', 11, 'bold'), bg=self.colors['topping_bg'], 
                                    fg=self.colors['text_primary'])
-            topping_label.pack(pady=(0, 5))
+            topping_label.pack(pady=(0, 2))
+            
+            # Price label (will be updated based on size)
+            # Get initial price for the selected size (medium is default)
+            initial_price = ""
+            size = self.selected_size.get()  # This should be "medium" by default
+            if topping in self.topping_prices and size in self.topping_prices[topping]:
+                initial_price = f"${self.topping_prices[topping][size]}"
+            
+            price_label = tk.Label(topping_frame, text=initial_price, 
+                                  font=('Arial', 11, 'bold'), bg=self.colors['topping_bg'], 
+                                  fg=self.colors['text_accent'], height=1)
+            price_label.pack(pady=(0, 8))
+            self.topping_price_labels[topping] = price_label
             
             # Controls frame
             controls_frame = tk.Frame(topping_frame, bg=self.colors['topping_bg'])
@@ -823,6 +1114,9 @@ class PizzaPOSApp:
             self.topping_counts[topping] = count_label
             print(f"DEBUG: Stored count label for {topping}")  # Debug line
         
+        # Update price labels based on initial size
+        self.update_topping_prices_display()
+        
         # Configure grid weights
         toppings_grid.columnconfigure(0, weight=1)
         toppings_grid.columnconfigure(1, weight=1)
@@ -836,7 +1130,62 @@ class PizzaPOSApp:
             btn.config(bg=self.colors['bg_secondary'])
         # Highlight selected size
         self.size_buttons[size].config(bg=self.colors['bg_button'])
+        # Update topping price displays
+        self.update_topping_prices_display()
         self.update_current_pizza_display()
+    
+    def update_topping_prices_display(self):
+        """Update topping price labels based on selected size"""
+        if not hasattr(self, 'topping_price_labels') or not self.topping_price_labels:
+            return
+        
+        if not hasattr(self, 'selected_size'):
+            return
+        
+        size = self.selected_size.get().lower()  # Ensure lowercase for consistency
+        print(f"DEBUG: Updating prices for size: {size}")  # Debug line
+        
+        for topping, price_label in self.topping_price_labels.items():
+            if topping in self.topping_prices:
+                if size in self.topping_prices[topping]:
+                    price = self.topping_prices[topping][size]
+                    price_label.config(text=f"${price}")
+                    print(f"DEBUG: Updated {topping} price to ${price} for size {size}")  # Debug line
+                else:
+                    # Calculate the price based on small price if missing
+                    # Try to get small price first
+                    base_price = None
+                    if 'small' in self.topping_prices[topping]:
+                        base_price = self.topping_prices[topping]['small']
+                    elif 'medium' in self.topping_prices[topping]:
+                        # Medium is 1.2x small, so calculate small from medium
+                        base_price = self.topping_prices[topping]['medium'] / Decimal('1.2')
+                    elif 'large' in self.topping_prices[topping]:
+                        # Large is 1.44x small, so calculate small from large
+                        base_price = self.topping_prices[topping]['large'] / Decimal('1.44')
+                    
+                    if base_price:
+                        # Calculate price for the requested size
+                        multipliers = {'small': Decimal('1.0'), 'medium': Decimal('1.2'), 'large': Decimal('1.44')}
+                        if size in multipliers:
+                            calculated_price = (base_price * multipliers[size]).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                            price_label.config(text=f"${calculated_price}")
+                            # Also save it to the dictionary and database for future use
+                            self.topping_prices[topping][size] = calculated_price
+                            self.cursor.execute('''
+                                INSERT OR REPLACE INTO prices (category, item_name, size, price)
+                                VALUES (?, ?, ?, ?)
+                            ''', ('topping', topping, size, float(calculated_price)))
+                            self.conn.commit()
+                            print(f"DEBUG: Calculated and saved {topping} price ${calculated_price} for size {size}")  # Debug line
+                        else:
+                            price_label.config(text="")
+                    else:
+                        price_label.config(text="")
+                        print(f"DEBUG: No base price found for {topping}")  # Debug line
+            else:
+                price_label.config(text="")
+                print(f"DEBUG: {topping} not found in topping_prices")  # Debug line
     
     def increase_topping(self, topping):
         """Increase topping count"""
@@ -919,9 +1268,10 @@ class PizzaPOSApp:
         for topping, count in self.selected_toppings.items():
             if count > 0:
                 topping_groups[topping] = count
-                # Add topping price for each quantity
-                for _ in range(count):
-                    topping_price += self.topping_prices[topping]
+                # Add topping price for each quantity using size-based pricing
+                if topping in self.topping_prices and size in self.topping_prices[topping]:
+                    topping_price_per_unit = self.topping_prices[topping][size]
+                    topping_price += topping_price_per_unit * Decimal(str(count))
         
         total_price = base_price + topping_price
         
@@ -1015,26 +1365,37 @@ class PizzaPOSApp:
             
             messagebox.showinfo("Order Processed", f"Order processed successfully!\nTotal: ${final_total}")
             
-            # Clear cart
+            # Clear cart and remove saved cart from database
             self.cart = []
+            self.cursor.execute('DELETE FROM carts WHERE user_id = ?', (self.current_user['id'],))
+            self.conn.commit()
             self.update_cart_display()
     
     def load_users(self):
         """Load users for admin view"""
         self.user_listbox.delete(0, tk.END)
-        self.cursor.execute('SELECT pin, is_admin FROM users ORDER BY pin')
+        self.cursor.execute('SELECT pin, COALESCE(name, pin) as name, is_admin FROM users ORDER BY pin')
         users = self.cursor.fetchall()
         
-        for pin, is_admin in users:
+        for pin, name, is_admin in users:
             admin_text = " (Admin)" if is_admin else ""
-            self.user_listbox.insert(tk.END, f"PIN: {pin}{admin_text}")
+            display_name = name if name and name != pin else f"PIN: {pin}"
+            self.user_listbox.insert(tk.END, f"{display_name}{admin_text}")
     
     def add_user(self):
         """Add new user"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add User")
-        dialog.geometry("300x180")
+        dialog.geometry("300x220")
         dialog.configure(bg=self.colors['bg_primary'])
+        
+        # Name
+        tk.Label(dialog, text="Name:", font=('Arial', 10, 'bold'), 
+                bg=self.colors['bg_primary'], fg=self.colors['text_primary']).pack(anchor='w', padx=10, pady=5)
+        name_entry = tk.Entry(dialog, font=('Arial', 10), width=20,
+                            relief='solid', bd=1, bg=self.colors['bg_primary'],
+                            fg=self.colors['text_primary'])
+        name_entry.pack(padx=10, pady=5)
         
         # PIN
         tk.Label(dialog, text="4-Digit PIN:", font=('Arial', 10, 'bold'), 
@@ -1055,6 +1416,7 @@ class PizzaPOSApp:
         button_frame.pack(fill='x', padx=10, pady=10)
         
         def save_user():
+            name = name_entry.get().strip()
             pin = pin_entry.get().strip()
             
             if not pin:
@@ -1073,10 +1435,12 @@ class PizzaPOSApp:
             
             try:
                 # Use PIN as username for database compatibility (username column still exists)
+                # Use name if provided, otherwise use PIN
+                display_name = name if name else None
                 self.cursor.execute('''
-                    INSERT INTO users (username, pin, is_admin)
-                    VALUES (?, ?, ?)
-                ''', (pin, pin, int(is_admin_var.get())))
+                    INSERT INTO users (username, pin, name, is_admin)
+                    VALUES (?, ?, ?, ?)
+                ''', (pin, pin, display_name, int(is_admin_var.get())))
                 self.conn.commit()
                 messagebox.showinfo("Success", "User added successfully!")
                 dialog.destroy()
@@ -1103,11 +1467,21 @@ class PizzaPOSApp:
             messagebox.showwarning("No Selection", "Please select a user to edit")
             return
         
-        pin_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
-        old_pin = pin_text.replace('PIN: ', '').strip()
+        user_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        # Extract PIN from display text (could be "Name" or "PIN: 1234")
+        if user_text.startswith('PIN: '):
+            old_pin = user_text.replace('PIN: ', '').strip()
+        else:
+            # Find user by name
+            self.cursor.execute('SELECT pin FROM users WHERE name = ?', (user_text,))
+            result = self.cursor.fetchone()
+            if result:
+                old_pin = result[0]
+            else:
+                old_pin = user_text  # Fallback
         
         # Get user data
-        self.cursor.execute('SELECT pin, is_admin FROM users WHERE pin = ?', (old_pin,))
+        self.cursor.execute('SELECT pin, COALESCE(name, pin) as name, is_admin FROM users WHERE pin = ?', (old_pin,))
         user_data = self.cursor.fetchone()
         
         if not user_data:
@@ -1116,8 +1490,17 @@ class PizzaPOSApp:
         
         dialog = tk.Toplevel(self.root)
         dialog.title("Edit User")
-        dialog.geometry("300x180")
+        dialog.geometry("300x220")
         dialog.configure(bg=self.colors['bg_primary'])
+        
+        # Name
+        tk.Label(dialog, text="Name:", font=('Arial', 10, 'bold'), 
+                bg=self.colors['bg_primary'], fg=self.colors['text_primary']).pack(anchor='w', padx=10, pady=5)
+        name_entry = tk.Entry(dialog, font=('Arial', 10), width=20,
+                            relief='solid', bd=1, bg=self.colors['bg_primary'],
+                            fg=self.colors['text_primary'])
+        name_entry.insert(0, user_data[1] if user_data[1] != user_data[0] else '')
+        name_entry.pack(padx=10, pady=5)
         
         # PIN
         tk.Label(dialog, text="4-Digit PIN:", font=('Arial', 10, 'bold'), 
@@ -1129,7 +1512,7 @@ class PizzaPOSApp:
         pin_entry.pack(padx=10, pady=5)
         
         # Admin checkbox
-        is_admin_var = tk.BooleanVar(value=bool(user_data[1]))
+        is_admin_var = tk.BooleanVar(value=bool(user_data[2]))
         admin_check = tk.Checkbutton(dialog, text="Administrator", variable=is_admin_var, 
                                     bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
         admin_check.pack(anchor='w', padx=10, pady=5)
@@ -1139,6 +1522,7 @@ class PizzaPOSApp:
         button_frame.pack(fill='x', padx=10, pady=10)
         
         def save_changes():
+            new_name = name_entry.get().strip()
             new_pin = pin_entry.get().strip()
             
             if not new_pin:
@@ -1157,11 +1541,12 @@ class PizzaPOSApp:
                     return
             
             try:
-                # Update PIN and admin status, use PIN as username for compatibility
+                # Update name, PIN and admin status, use PIN as username for compatibility
+                display_name = new_name if new_name else None
                 self.cursor.execute('''
-                    UPDATE users SET username = ?, pin = ?, is_admin = ?
+                    UPDATE users SET username = ?, pin = ?, name = ?, is_admin = ?
                     WHERE pin = ?
-                ''', (new_pin, new_pin, int(is_admin_var.get()), old_pin))
+                ''', (new_pin, new_pin, display_name, int(is_admin_var.get()), old_pin))
                 self.conn.commit()
                 messagebox.showinfo("Success", "User updated successfully!")
                 dialog.destroy()
@@ -1188,14 +1573,24 @@ class PizzaPOSApp:
             messagebox.showwarning("No Selection", "Please select a user to delete")
             return
         
-        pin_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
-        pin = pin_text.replace('PIN: ', '').strip()
+        user_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        # Extract PIN from display text
+        if user_text.startswith('PIN: '):
+            pin = user_text.replace('PIN: ', '').strip()
+        else:
+            # Find user by name
+            self.cursor.execute('SELECT pin FROM users WHERE name = ?', (user_text,))
+            result = self.cursor.fetchone()
+            if result:
+                pin = result[0]
+            else:
+                pin = user_text  # Fallback
         
         if pin == self.current_user['pin']:
             messagebox.showerror("Error", "You cannot delete your own account")
             return
         
-        if messagebox.askyesno("Delete User", f"Are you sure you want to delete user with PIN '{pin}'?"):
+        if messagebox.askyesno("Delete User", f"Are you sure you want to delete user '{user_text}'?"):
             self.cursor.execute('DELETE FROM users WHERE pin = ?', (pin,))
             self.conn.commit()
             messagebox.showinfo("Success", "User deleted successfully!")
@@ -1208,10 +1603,20 @@ class PizzaPOSApp:
             messagebox.showwarning("No Selection", "Please select a user to reset PIN")
             return
         
-        pin_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
-        old_pin = pin_text.replace('PIN: ', '').strip()
+        user_text = self.user_listbox.get(selection[0]).split(' (Admin)')[0]
+        # Extract PIN from display text
+        if user_text.startswith('PIN: '):
+            old_pin = user_text.replace('PIN: ', '').strip()
+        else:
+            # Find user by name
+            self.cursor.execute('SELECT pin FROM users WHERE name = ?', (user_text,))
+            result = self.cursor.fetchone()
+            if result:
+                old_pin = result[0]
+            else:
+                old_pin = user_text  # Fallback
         
-        new_pin = simpledialog.askstring("Reset PIN", f"Enter new 4-digit PIN for user with PIN {old_pin}:")
+        new_pin = simpledialog.askstring("Reset PIN", f"Enter new 4-digit PIN for user '{user_text}':")
         if new_pin and len(new_pin) == 4 and new_pin.isdigit():
             # Check if new PIN is already in use
             if new_pin != old_pin:
@@ -1221,7 +1626,7 @@ class PizzaPOSApp:
                     return
             self.cursor.execute('UPDATE users SET pin = ?, username = ? WHERE pin = ?', (new_pin, new_pin, old_pin))
             self.conn.commit()
-            messagebox.showinfo("Success", f"PIN reset for user with PIN {old_pin}")
+            messagebox.showinfo("Success", f"PIN reset for user '{user_text}'")
         elif new_pin:
             messagebox.showerror("Error", "PIN must be exactly 4 digits")
     
@@ -1291,20 +1696,111 @@ class PizzaPOSApp:
         topping_inner = tk.Frame(topping_frame, bg=self.colors['bg_primary'])
         topping_inner.pack(fill='x', padx=10, pady=10)
         
+        # Function to auto-calculate other sizes when one is changed
+        def update_topping_sizes(topping_name, changed_size):
+            """Update other size prices when one size is changed (20% increase per size)"""
+            try:
+                # Get the changed price
+                changed_entry = price_entries[('topping', topping_name, changed_size)]
+                new_price_str = changed_entry.get().strip()
+                if not new_price_str:
+                    return
+                
+                new_price = Decimal(new_price_str)
+                
+                # Calculate base price (small) from the changed size
+                if changed_size == 'small':
+                    base_price = new_price
+                elif changed_size == 'medium':
+                    # Medium is 1.2x small, so small = medium / 1.2
+                    base_price = new_price / Decimal('1.2')
+                elif changed_size == 'large':
+                    # Large is 1.44x small, so small = large / 1.44
+                    base_price = new_price / Decimal('1.44')
+                else:
+                    return
+                
+                # Update other sizes
+                if changed_size != 'small':
+                    small_entry = price_entries.get(('topping', topping_name, 'small'))
+                    if small_entry:
+                        small_entry.delete(0, tk.END)
+                        small_entry.insert(0, str(base_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)))
+                
+                if changed_size != 'medium':
+                    medium_entry = price_entries.get(('topping', topping_name, 'medium'))
+                    if medium_entry:
+                        medium_price = (base_price * Decimal('1.2')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        medium_entry.delete(0, tk.END)
+                        medium_entry.insert(0, str(medium_price))
+                
+                if changed_size != 'large':
+                    large_entry = price_entries.get(('topping', topping_name, 'large'))
+                    if large_entry:
+                        large_price = (base_price * Decimal('1.44')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        large_entry.delete(0, tk.END)
+                        large_entry.insert(0, str(large_price))
+            except (ValueError, KeyError):
+                pass  # Ignore invalid input
+        
+        # Topping prices by size
         for topping in sorted(self.topping_prices.keys()):
+            # Small size
             row = tk.Frame(topping_inner, bg=self.colors['bg_primary'])
             row.pack(fill='x', pady=5)
             
-            tk.Label(row, text=f"{topping}:", font=('Arial', 10, 'bold'),
-                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=15, anchor='w').pack(side='left')
+            tk.Label(row, text=f"{topping} (Small):", font=('Arial', 10, 'bold'),
+                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=20, anchor='w').pack(side='left')
             tk.Label(row, text="$", font=('Arial', 10), bg=self.colors['bg_primary'],
                     fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
             
             entry = tk.Entry(row, font=('Arial', 10), width=10, relief='solid', bd=1,
                            bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
-            entry.insert(0, str(self.topping_prices.get(topping, '0.00')))
+            small_price = self.topping_prices.get(topping, {}).get('small', '0.00')
+            entry.insert(0, str(small_price))
             entry.pack(side='left')
-            price_entries[('topping', topping)] = entry
+            price_entries[('topping', topping, 'small')] = entry
+            # Bind to auto-calculate when changed
+            entry.bind('<KeyRelease>', lambda e, t=topping, s='small': update_topping_sizes(t, s))
+            entry.bind('<FocusOut>', lambda e, t=topping, s='small': update_topping_sizes(t, s))
+            
+            # Medium size
+            row = tk.Frame(topping_inner, bg=self.colors['bg_primary'])
+            row.pack(fill='x', pady=5)
+            
+            tk.Label(row, text=f"{topping} (Medium):", font=('Arial', 10, 'bold'),
+                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=20, anchor='w').pack(side='left')
+            tk.Label(row, text="$", font=('Arial', 10), bg=self.colors['bg_primary'],
+                    fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
+            
+            entry = tk.Entry(row, font=('Arial', 10), width=10, relief='solid', bd=1,
+                           bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
+            medium_price = self.topping_prices.get(topping, {}).get('medium', '0.00')
+            entry.insert(0, str(medium_price))
+            entry.pack(side='left')
+            price_entries[('topping', topping, 'medium')] = entry
+            # Bind to auto-calculate when changed
+            entry.bind('<KeyRelease>', lambda e, t=topping, s='medium': update_topping_sizes(t, s))
+            entry.bind('<FocusOut>', lambda e, t=topping, s='medium': update_topping_sizes(t, s))
+            
+            # Large size
+            row = tk.Frame(topping_inner, bg=self.colors['bg_primary'])
+            row.pack(fill='x', pady=5)
+            
+            tk.Label(row, text=f"{topping} (Large):", font=('Arial', 10, 'bold'),
+                    bg=self.colors['bg_primary'], fg=self.colors['text_primary'], width=20, anchor='w').pack(side='left')
+            tk.Label(row, text="$", font=('Arial', 10), bg=self.colors['bg_primary'],
+                    fg=self.colors['text_primary']).pack(side='left', padx=(0, 2))
+            
+            entry = tk.Entry(row, font=('Arial', 10), width=10, relief='solid', bd=1,
+                           bg=self.colors['bg_primary'], fg=self.colors['text_primary'])
+            large_price = self.topping_prices.get(topping, {}).get('large', '0.00')
+            entry.insert(0, str(large_price))
+            entry.pack(side='left')
+            price_entries[('topping', topping, 'large')] = entry
+            # Bind to auto-calculate when changed
+            entry.bind('<KeyRelease>', lambda e, t=topping, s='large': update_topping_sizes(t, s))
+            entry.bind('<FocusOut>', lambda e, t=topping, s='large': update_topping_sizes(t, s))
         
         # Drink Prices Section
         drink_frame = tk.LabelFrame(scrollable_frame, text="Drink Prices", 
@@ -1371,31 +1867,67 @@ class PizzaPOSApp:
                 errors = []
                 
                 # Validate and save all prices
-                for (category, item_name), entry in price_entries.items():
+                for key, entry in price_entries.items():
                     try:
+                        # Handle different key formats:
+                        # - ('pizza', size): pizza prices where item_name is the size
+                        # - ('topping', topping_name, size): topping prices with size
+                        # - ('drink', drink_name): drink prices (no size)
+                        # - ('tax', 'rate'): tax rate (no size)
+                        if len(key) == 3:
+                            category, item_name, size = key
+                        elif len(key) == 2:
+                            category, item_name = key
+                            # For pizza, item_name is the size, so size should be None
+                            if category == 'pizza':
+                                size = None
+                            else:
+                                size = None  # drinks and tax don't have size
+                        else:
+                            errors.append(f"Invalid key format: {key}")
+                            continue
+                        
                         value = entry.get().strip()
                         if not value:
-                            errors.append(f"{item_name}: Empty value")
+                            display_name = f"{item_name}{' (' + size + ')' if size else ''}"
+                            errors.append(f"{display_name}: Empty value")
                             continue
                         
                         price_decimal = Decimal(value)
                         if price_decimal < 0:
-                            errors.append(f"{item_name}: Negative value not allowed")
+                            display_name = f"{item_name}{' (' + size + ')' if size else ''}"
+                            errors.append(f"{display_name}: Negative value not allowed")
                             continue
                         
                         # Update or insert price
-                        self.cursor.execute('''
-                            INSERT INTO prices (category, item_name, price)
-                            VALUES (?, ?, ?)
-                            ON CONFLICT(category, item_name) DO UPDATE SET
-                                price = excluded.price,
-                                updated_at = CURRENT_TIMESTAMP
-                        ''', (category, item_name, float(price_decimal)))
+                        # Use a more robust approach that handles the unique constraint
+                        # First, try to update existing record
+                        if size is None:
+                            self.cursor.execute('''
+                                UPDATE prices 
+                                SET price = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE category = ? AND item_name = ? AND size IS NULL
+                            ''', (float(price_decimal), category, item_name))
+                        else:
+                            self.cursor.execute('''
+                                UPDATE prices 
+                                SET price = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE category = ? AND item_name = ? AND size = ?
+                            ''', (float(price_decimal), category, item_name, size))
                         
-                    except ValueError:
-                        errors.append(f"{item_name}: Invalid number format")
+                        # If no rows were updated, insert new record
+                        if self.cursor.rowcount == 0:
+                            self.cursor.execute('''
+                                INSERT INTO prices (category, item_name, size, price)
+                                VALUES (?, ?, ?, ?)
+                            ''', (category, item_name, size, float(price_decimal)))
+                        
+                    except ValueError as e:
+                        display_name = f"{item_name}{' (' + size + ')' if size else ''}"
+                        errors.append(f"{display_name}: Invalid number format")
                     except Exception as e:
-                        errors.append(f"{item_name}: {str(e)}")
+                        display_name = f"{item_name}{' (' + size + ')' if size else ''}"
+                        errors.append(f"{display_name}: {str(e)}")
                 
                 if errors:
                     error_msg = "Some prices could not be saved:\n\n" + "\n".join(errors)
@@ -1446,7 +1978,7 @@ class PizzaPOSApp:
     def view_orders(self):
         """View order history"""
         self.cursor.execute('''
-            SELECT o.id, u.pin, o.total, o.created_at
+            SELECT o.id, u.pin, COALESCE(u.name, u.pin) as user_name, o.total, o.created_at
             FROM orders o
             JOIN users u ON o.user_id = u.id
             ORDER BY o.created_at DESC
@@ -1461,29 +1993,96 @@ class PizzaPOSApp:
         # Create orders window
         orders_window = tk.Toplevel(self.root)
         orders_window.title("Order History")
-        orders_window.geometry("600x400")
+        orders_window.geometry("700x400")
         
-        # Orders list
-        orders_frame = tk.Frame(orders_window)
-        orders_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        # Orders list with scrollbar
+        canvas = tk.Canvas(orders_window)
+        scrollbar = tk.Scrollbar(orders_window, orient="vertical", command=canvas.yview)
+        orders_frame = tk.Frame(canvas)
+        
+        orders_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=orders_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        scrollbar.pack(side="right", fill="y")
         
         # Headers
-        headers = ["Order ID", "User PIN", "Total", "Date"]
+        headers = ["Order ID", "User", "Total", "Date & Time"]
         for i, header in enumerate(headers):
-            tk.Label(orders_frame, text=header, font=('Arial', 10, 'bold')).grid(row=0, column=i, padx=5, pady=5)
+            tk.Label(orders_frame, text=header, font=('Arial', 10, 'bold')).grid(row=0, column=i, padx=5, pady=5, sticky='w')
         
         # Order rows
-        for row, (order_id, user_pin, total, created_at) in enumerate(orders, 1):
-            tk.Label(orders_frame, text=str(order_id)).grid(row=row, column=0, padx=5, pady=2)
-            tk.Label(orders_frame, text=user_pin).grid(row=row, column=1, padx=5, pady=2)
-            tk.Label(orders_frame, text=f"${total:.2f}").grid(row=row, column=2, padx=5, pady=2)
-            tk.Label(orders_frame, text=created_at).grid(row=row, column=3, padx=5, pady=2)
+        for row, (order_id, user_pin, user_name, total, created_at) in enumerate(orders, 1):
+            # Format timestamp properly
+            try:
+                # Parse the timestamp and format it nicely
+                if isinstance(created_at, str):
+                    # Try to parse the timestamp
+                    dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.datetime.fromtimestamp(created_at)
+                formatted_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                formatted_time = str(created_at)
+            
+            tk.Label(orders_frame, text=str(order_id)).grid(row=row, column=0, padx=5, pady=2, sticky='w')
+            tk.Label(orders_frame, text=user_name).grid(row=row, column=1, padx=5, pady=2, sticky='w')
+            tk.Label(orders_frame, text=f"${total:.2f}").grid(row=row, column=2, padx=5, pady=2, sticky='w')
+            tk.Label(orders_frame, text=formatted_time).grid(row=row, column=3, padx=5, pady=2, sticky='w')
     
     def logout(self):
         """Logout and return to login screen"""
+        # Save cart before logging out
+        if self.current_user:
+            self.save_cart_for_user()
         self.current_user = None
         self.cart = []
         self.show_login()
+    
+    def save_cart_for_user(self):
+        """Save current cart to database for the logged-in user"""
+        if not self.current_user or not self.cart:
+            # If cart is empty, delete saved cart
+            self.cursor.execute('DELETE FROM carts WHERE user_id = ?', (self.current_user['id'],))
+            self.conn.commit()
+            return
+        
+        import json
+        cart_json = json.dumps(self.cart, default=str)  # default=str handles Decimal serialization
+        self.cursor.execute('''
+            INSERT INTO carts (user_id, cart_data)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                cart_data = excluded.cart_data,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (self.current_user['id'], cart_json))
+        self.conn.commit()
+    
+    def load_cart_for_user(self):
+        """Load saved cart from database for the logged-in user"""
+        if not self.current_user:
+            return
+        
+        self.cursor.execute('SELECT cart_data FROM carts WHERE user_id = ?', (self.current_user['id'],))
+        result = self.cursor.fetchone()
+        if result:
+            import json
+            try:
+                cart_data = json.loads(result[0])
+                # Convert price strings back to Decimal
+                for item in cart_data:
+                    if 'price' in item:
+                        item['price'] = Decimal(str(item['price']))
+                self.cart = cart_data
+            except (json.JSONDecodeError, KeyError):
+                self.cart = []
+        else:
+            self.cart = []
     
     def run(self):
         """Start the application"""
