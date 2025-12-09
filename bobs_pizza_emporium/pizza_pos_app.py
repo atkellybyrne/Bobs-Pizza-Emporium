@@ -239,6 +239,14 @@ class PizzaPOSApp:
                 self.topping_prices[name] = {}
             self.topping_prices[name][size] = Decimal(str(price))
         
+        # If no toppings loaded, ensure we have at least the default structure
+        # This handles cases where database hasn't been initialized yet
+        if not self.topping_prices:
+            default_toppings = ['Pepperoni', 'Sausage', 'Bacon', 'Pineapple', 'Mushrooms', 'Onions']
+            for topping in default_toppings:
+                if topping not in self.topping_prices:
+                    self.topping_prices[topping] = {'small': Decimal('1.00'), 'medium': Decimal('1.25'), 'large': Decimal('1.50')}
+        
         # Load drink prices
         self.cursor.execute('SELECT item_name, price FROM prices WHERE category = ?', ('drink',))
         drink_data = self.cursor.fetchall()
@@ -799,7 +807,22 @@ class PizzaPOSApp:
         self.topping_counts = {}
         
         # Create topping buttons with +/- controls and icons (like in the image)
-        toppings = list(self.topping_prices.keys())
+        # Get topping names from the nested dictionary structure {topping: {size: price}}
+        if self.topping_prices:
+            toppings = list(self.topping_prices.keys())
+        else:
+            # Fallback: if topping_prices is empty, try to get from database
+            self.cursor.execute('SELECT DISTINCT item_name FROM prices WHERE category = ? AND size IS NOT NULL', ('topping',))
+            toppings = [row[0] for row in self.cursor.fetchall()]
+            if not toppings:
+                # If still empty, use default toppings
+                toppings = ['Pepperoni', 'Sausage', 'Bacon', 'Pineapple', 'Mushrooms', 'Onions']
+        
+        # Ensure we have toppings to display
+        if not toppings:
+            messagebox.showwarning("No Toppings", "No toppings are configured. Please configure topping prices in the admin panel.")
+            dialog.destroy()
+            return
         
         # Topping icons based on the image descriptions
         topping_icons = {
